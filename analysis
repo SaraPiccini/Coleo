@@ -1,0 +1,2089 @@
+View(coleo)
+coleo <- as.data.frame(coleo)
+str(coleo)
+
+# Standardizing sampling effort with iNEXT ----
+# Transform data in wide format at trap level 
+coleo_wide <- coleo[c(10,11,24)]
+
+data_wide <- coleo_wide %>%
+  pivot_wider(names_from = species, values_from = abundance)
+# some duplicates have been found
+
+duplicates <- coleo_wide %>%
+  dplyr::group_by(trapID, species) %>%
+  dplyr::summarise(n = dplyr::n()) %>%
+  dplyr::filter(n > 1)
+
+# Somma le abbondanze dei duplicati (stessa specie e stesso trapID)
+coleo_summed <- coleo_wide %>%
+  group_by(trapID, species) %>%
+  summarise(abundance = sum(abundance, na.rm = TRUE), .groups = 'drop')
+
+# Trasforma in formato wide con values_fill = 0 per gestire i valori mancanti
+data_wide <- coleo_summed %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0)
+
+# Rimuovi la prima colonna (trapID) e converti in matrice
+#data_matrix <- as.matrix(data_wide_numeric[,-1])
+coleo_datainext <- aggregate(data_wide[, 2:1052],by=list(data_wide$trapID),sum)
+coleo_stand.mat <- t(coleo_datainext[,-1])
+colnames(coleo_stand.mat) <- coleo_datainext$Group.1
+coleo_stand.list <- as.list(as.data.frame(coleo_stand.mat))
+
+# Assuming data_matrix is your community data matrix (sites x species)
+diversity_estimates <- iNEXT(coleo_stand.list, q = c(0, 1, 2), datatype = "abundance")
+diversity_estimates
+str(diversity_estimates)
+View(diversity_estimates)
+
+diversity_estimates2 <- iNEXT3D(coleo_stand.list, q = c(0, 1, 2), datatype = "abundance")
+diversity_estimates2
+ggiNEXT3D(diversity_estimates2, type = 1)
+ggiNEXT3D(diversity_estimates2, type = 2)
+ggiNEXT3D(diversity_estimates2, type = 3)
+
+estimate3D(coleo_stand.list, diversity = "TD", q = c(0, 1, 2), datatype = "abundance",
+           base = "coverage", level = NULL)
+           
+
+# Visualizzazione della copertura della campionatura con i valori di qD
+
+ggSC <- ggplot(diversity_estimates$iNextEst$coverage_based %>%
+                 filter(Method == "Rarefaction", Order.q == 0), aes(x = SC, y = qD)) +
+  geom_point() +
+  labs(x = "Sample Coverage (SC)", y = "Species Richness (qD)", 
+       title = "Species Richness vs Sample Coverage") +
+  theme_bw()
+
+# Filtra solo i valori di rarefaction per species richness (q = 0)
+rarefaction_richness <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>%
+  select(Assemblage, SC, m, qD)
+
+# Scegliere il valore di rarefazione con la copertura più alta disponibile per tutte le trappole
+# Ottieni la copertura massima per ciascuna trappola
+max_SC_per_trappola <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>% # Filtra species richness (q = 0) e rarefazione
+  group_by(Assemblage) %>%
+  summarize(max_SC = max(SC))
+
+summary(max_SC_per_trappola)
+# Unisci i risultati con la copertura massima a quelli originali per ottenere i valori di species richness
+richness_max_SC <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>% # Filtra species richness (q = 0) e rarefazione
+  inner_join(max_SC_per_trappola, by = "Assemblage") %>% # Unisci sulla base dell'assemblaggio
+  filter(SC == max_SC) %>% # Filtra per la copertura massima
+  select(Assemblage, SC, m, qD) # Seleziona le colonne di interesse
+
+
+# Calcola il minimo tra gli SC massimi
+min_max_SC <- min(max_SC_per_trappola$max_SC)
+
+# Visualizza il risultato
+print(min_max_SC)
+
+# Estrai i valori di ricchezza per il SC minimo comune a tutte le trappole
+richness_min_max_SC <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0, SC >= min_max_SC) %>% # Filtra per SC >= minimo tra SC massimi
+  group_by(Assemblage) %>%
+  slice_min(SC) %>% # Prende il valore più vicino al min_max_SC per ciascuna trappola
+  select(Assemblage, SC, m, qD)
+
+# confrontare le trappole a un livello di SC = 0.6857 (1st Quartile) e SC = 0.8152 (Mediana)
+# Definisci i valori di SC del 1° quartile e della mediana
+SC_1st_quartile <- 0.6857
+SC_median <- 0.8152
+SC_mean <- 0.7697
+
+# 1. Estrai i valori di ricchezza (qD) per il valore di SC più vicino al 1° quartile (0.6857)
+richness_1st_quartile <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>%
+  group_by(Assemblage) %>%
+  slice(which.min(abs(SC - SC_1st_quartile))) %>% # Prende il valore di SC più vicino a 0.6857
+  select(Assemblage, SC, m, qD)
+
+# 2. Estrai i valori di ricchezza (qD) per il valore di SC più vicino alla mediana (0.8152)
+richness_median <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>%
+  group_by(Assemblage) %>%
+  slice(which.min(abs(SC - SC_median))) %>% # Prende il valore di SC più vicino a 0.8152
+  select(Assemblage, SC, m, qD)
+
+# 2. Estrai i valori di ricchezza (qD) per il valore di SC più vicino alla media ( 0.7697)
+richness_mean <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0) %>%
+  group_by(Assemblage) %>%
+  slice(which.min(abs(SC - SC_mean))) %>% # Prende il valore di SC più vicino a  0.7697
+  select(Assemblage, SC, m, qD)
+
+
+summary(richness_min_max_SC)
+summary(richness_max_SC)
+summary(richness_1st_quartile)
+summary(richness_median)
+summary(richness_mean)
+
+# Combina i dati dei diversi gruppi di SC in un unico dataframe (separato per quartili, mediane, massimo)
+richness_all_groups <- rbind(
+  data.frame(Assemblage = richness_1st_quartile$Assemblage, SC = "1st_quartile", qD = richness_1st_quartile$qD),
+  data.frame(Assemblage = richness_median$Assemblage, SC = "median", qD = richness_median$qD),
+  data.frame(Assemblage = richness_max_SC$Assemblage, SC = "max_SC", qD = richness_max_SC$qD),
+  data.frame(Assemblage = richness_mean$Assemblage, SC = "mean_SC", qD = richness_mean$qD),
+  data.frame(Assemblage = richness_min_max_SC$Assemblage, SC = "min_max_SC", qD = richness_max_SC$qD)
+)
+
+# Creare un boxplot per confrontare la ricchezza di specie tra i gruppi
+ggplot(richness_all_groups, aes(x = SC, y = qD, fill = SC)) +
+  geom_boxplot() +
+  labs(title = "Confronto della diversità (qD) a diversi livelli di copertura (SC)",
+       x = "Livello di Copertura (SC)",
+       y = "Ricchezza di Specie (qD)") +
+  theme_minimal()
+
+
+# Rimuovi righe con NA o valori non numerici
+richness_all_groups_clean <- na.omit(richness_all_groups)
+
+
+ggplot(richness_all_groups, aes(x = as.numeric(SC), y = qD, color = SC)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) + # Aggiungi una linea di regressione
+  labs(title = "Relazione tra Ricchezza di Specie (qD) e Copertura (SC)",
+       x = "Copertura Campionaria (SC)",
+       y = "Ricchezza di Specie (qD)") +
+  theme_minimal()
+
+# Eseguire un'ANOVA per confrontare qD tra i gruppi di SC
+anova_result <- aov(qD ~ SC, data = richness_all_groups)
+summary(anova_result)
+
+# Se l'ANOVA risulta significativa, eseguire un post-hoc test Tukey per vedere quali gruppi differiscono tra loro
+TukeyHSD(anova_result)
+
+# Eseguire il test di Kruskal-Wallis
+kruskal.test(qD ~ SC, data = richness_all_groups)
+
+# Aggiungi una colonna per la differenza tra qD a SC_min e SC_max
+richness_comparison <- merge(richness_min_max_SC, richness_max_SC, by = "Assemblage", suffixes = c("_min", "_max"))
+
+# Calcola la differenza
+richness_comparison$difference_qD <- richness_comparison$qD_max - richness_comparison$qD_min
+
+# Visualizza un boxplot della differenza di qD tra SC_min e SC_max
+ggplot(richness_comparison, aes(x = "", y = difference_qD)) +
+  geom_boxplot() +
+  labs(title = "Differenza di Ricchezza di Specie (qD) tra SC_min e SC_max",
+       y = "Differenza di qD") +
+  theme_minimal()
+
+# Eseguire un test t per campioni appaiati
+t_test_result <- t.test(richness_comparison$qD_min, richness_comparison$qD_max, paired = TRUE)
+t_test_result
+
+
+
+
+
+
+
+
+# scegli un livello comune di copertura ed estrarre solo i valori di rarefazione per quel livello di copertura:
+# Filtra rarefaction con SC > 0.5 per species richness (q = 0)
+rarefaction_richness_SC <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Method == "Rarefaction", Order.q == 0, SC > 0.5) %>%
+  select(Assemblage, SC, m, qD)
+
+# Visualizza il risultato
+print(rarefaction_richness_SC)
+
+
+
+# Estrai i valori di Sample Coverage
+sc_values <- diversity_estimates$iNextEst$coverage_based %>%
+  select(Assemblage, SC)
+
+sc_values_sorted <- sc_values %>%
+  arrange(SC)
+head(sc_values_sorted)
+tail(sc_values_sorted)
+
+# Esempio di analisi di sensibilità per SC > 0.5
+sc_filtered5 <- sc_values %>%
+  filter(SC > 0.5)
+
+# Esempio di analisi di sensibilità per SC > 0.7
+sc_filtered7 <- sc_values %>%
+  filter(SC > 0.7)
+
+# Esempio di analisi di sensibilità per SC > 0.5
+sc_filtered9 <- sc_values %>%
+  filter(SC > 0.9)
+
+# stima di ricchezza di specie per ogni trappola a una copertura standardizzata di 0.5
+# Calcola e visualizza i valori di qD per queste trappole
+richness_filtered5 <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 0, Assemblage %in% sc_filtered5$Assemblage) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+
+# Calcola e visualizza i valori di qD per queste trappole
+richness_filtered7 <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 0, Assemblage %in% sc_filtered7$Assemblage) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+
+# Calcola e visualizza i valori di qD per queste trappole
+richness_filtered9 <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 0, Assemblage %in% sc_filtered9$Assemblage) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+
+species_richness <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 0) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+species_richness2 <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 0) %>%
+  select(Assemblage, qD)
+print(species_richness, n=637)
+
+summary(species_richness)
+summary(richness_filtered5)
+summary(richness_filtered7)
+summary(richness_filtered9)
+
+shannon_div <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 1) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+
+simpson_div <- diversity_estimates$iNextEst$coverage_based %>%
+  filter(Order.q == 2) %>%
+  group_by(Assemblage) %>%
+  summarize(qD = mean(qD))
+
+
+
+
+
+# beta-div from iNEXT predicted values ----
+
+# Converti i dati in una matrice (se non lo sono già)
+richness_matrix <- pivot_wider(species_richness, names_from = Assemblage, values_from = qD) %>%
+  as.matrix()
+View(richness_matrix)
+
+# Calcola la beta diversity (es. con metodo Jaccard o Bray-Curtis)
+beta_div <- vegdist(richness_matrix, method = "bray")
+View(beta_div)
+
+# Estrai la tabella delle stime asintotiche
+# Asymptotic Estimates - stimare la diversità massima che ci si aspetterebbe di osservare se il campionamento fosse completo
+asy_estimates <- diversity_estimates$AsyEst
+
+# Filtra AsyEst per ottenere solo le righe relative alla Species Richness
+asy_species_richness <- asy_estimates %>%
+  filter(Diversity == "Species richness") %>%
+  select(Assemblage, AsyEst = Estimator)
+
+
+
+
+
+# Aggiungi la colonna `trapID` che corrisponde alla colonna `Assemblage`
+asy_estimates <- asy_estimates %>%
+  rename(trapID = Assemblage)
+str(asy_estimates)
+# Crea una matrice con le metriche di diversità (questo è solo un esempio)
+div_matrix <- asy_estimates %>%
+  pivot_wider(names_from = Diversity, values_from = Estimator) %>%
+  select(-trapID) %>%
+  as.matrix()
+
+# Calcola la beta diversity sulla base di queste metriche
+beta_div <- vegdist(asy_estimates, method = "euclidean") # Es. distanza euclidea tra le metriche
+summary(asy_estimates)
+
+
+
+# Esempio di ordinamento NMDS
+nmds_result <- metaMDS(beta_div)
+
+# Plot dei risultati NMDS
+plot(nmds_result)
+
+
+
+
+
+# Converti i dati in una matrice (se non lo sono già)
+richness_matrix <- pivot_wider(species_richness, names_from = Assemblage, values_from = qD) %>%
+  as.matrix()
+
+# Calcola la beta diversity (es. con metodo Jaccard o Bray-Curtis)
+beta_div <- vegdist(richness_matrix, method = "bray")
+
+
+out <- ChaoRichness(data_wide, datatype = "abundance")
+out
+
+# Step 1: Aggiungi trapID a diversity_estimates
+stratum<- rep(coleo_datainext$Group.1, each = 3)  # Ripetiamo ogni trapID 3 volte (q=0, q=1, q=2)
+
+View(diversity_estimates$iNextEst$coverage_based)
+
+# Plot sample coverage
+ggiNEXT(diversity_estimates, type = 2)  # Type 2 gives the sample coverage curve
+ggiNEXT(diversity_estimates, type = 2) + 
+  scale_shape_manual(values = rep(1:6, length.out = 1051)) +  # Repeat shape values
+  scale_color_manual(values = rep(RColorBrewer::brewer.pal(6, "Set1"), length.out = 1051))
+
+# Rarefaction/extrapolation to the chosen coverage level (e.g., 0.8)
+standardized_abundance <- estimateD(data_matrix, q = c(0, 1, 2), datatype = "abundance", base = "coverage", level = 0.8)
+
+# Get the standardized abundance matrix (e.g., at a specific coverage)
+rarefied_abundance <- diversity_estimates$iNextEst$coverage_based_coverage
+
+# Assuming rarefied_abundance is the standardized matrix
+dis_q0 <- vegdist(rarefied_abundance, method = "bray", binary = TRUE)  # Sørensen index (q = 0)
+dis_q1 <- vegdist(rarefied_abundance, method = "horn")                 # Horn index (q = 1)
+dis_q2 <- vegdist(rarefied_abundance, method = "morisita")             # Morisita-Horn index (q = 2)
+
+
+# Perform variation partitioning for each q value
+varpart_q0 <- varpart(dis_q0, ~ stratum, ~ stand, ~ site)
+varpart_q1 <- varpart(dis_q1, ~ stratum, ~ stand, ~ site)
+varpart_q2 <- varpart(dis_q2, ~ stratum, ~ stand, ~ site)
+
+# Base R plotting for each q value
+par(mfrow = c(3, 3))  # Layout for 3x3 grid
+
+# q = 0 (Sørensen)
+plot(varpart_q0, bg = 2:5, Xnames = c("stratum", "stand", "site"), main = "q = 0")
+
+# q = 1 (Horn)
+plot(varpart_q1, bg = 2:5, Xnames = c("stratum", "stand", "site"), main = "q = 1")
+
+# q = 2 (Morisita-Horn)
+plot(varpart_q2, bg = 2:5, Xnames = c("stratum", "stand", "site"), main = "q = 2")
+
+
+
+
+# Calculate Bray-Curtis dissimilarity matrix - change with rarefied/extrapolated values
+bray_curtis_dist <- vegdist(comm, method = "bray")
+# Run PERMANOVA (adonis function)
+adonis_result <- adonis(bray_curtis_dist ~ tree_species * deadwood_position + stand, data = env, permutations = 999)
+
+# Print the results
+print(adonis_result)
+
+# Subsetting data for pairwise comparison between deadwood positions
+deadwood1_vs_deadwood2 <- subset(env, deadwood_position %in% c("Near ground", "Mid-canopy"))
+bray_curtis_sub <- vegdist(comm[env$deadwood_position %in% c("Near ground", "Mid-canopy"), ], method = "bray")
+
+# Run PERMANOVA for the subset
+adonis_pairwise <- adonis(bray_curtis_sub ~ tree_species * deadwood_position + stand, data = deadwood1_vs_deadwood2, permutations = 999)
+
+# Print the results
+print(adonis_pairwise)
+
+# Adjust p-values using Bonferroni correction
+p_values <- c(adonis_result$aov.tab$`Pr(>F)`[1:2], adonis_pairwise$aov.tab$`Pr(>F)`[1:2])  # Replace with actual p-values
+adjusted_p_values <- p.adjust(p_values, method = "bonferroni")
+
+# Print adjusted p-values
+print(adjusted_p_values)
+
+
+# Converti i risultati in un data frame
+results_df <- as.data.frame(diversity_estimates)
+View(diversity_estimates)
+str(diversity_estimates)
+
+# riparti da qui ----
+coleo_long <- pivot_longer(
+  coleo_wide, 
+  cols = -trapID, # Colonne da non trasformare
+  names_to = "species", # Nome della nuova colonna che conterrà i nomi delle specie
+  values_to = "Count" # Nome della nuova colonna che conterrà i valori delle specie (abundances)
+)
+
+# Step 2: Filtrare solo le righe con conteggi > 0 (solo le specie presenti in ciascun trapID)
+coleo_long <- coleo_long[coleo_long$Count > 0, ]
+
+# Step 3: Unire il dataframe lungo con diversity_estimates
+merged_df <- merge(diversity_estimates, coleo_long, by = "Assemblage")
+
+# iNEXT ----
+
+# Transform data in wide format at trap level 
+coleo_wide <- coleo[c(5,10,11,15,24,25)]
+
+# Raggruppa per trapID e specie, sommando le abbondanze
+coleo_wide <- coleo_wide %>%
+  group_by(trapID, species, stand, stratum, stand_type, plot) %>%
+  summarise(abundance = sum(abundance), .groups = 'drop')
+
+coleo_g <- coleo_wide[coleo_wide$stratum == "1", ]
+coleo_u <- coleo_wide[coleo_wide$stratum == "2", ]
+coleo_c <- coleo_wide[coleo_wide$stratum == "3", ]
+str(coleo_wide)
+str(coleo_wide)
+# Pivota il dataframe trap level -> community matrix
+coleo_cm <- pivot_wider(
+  data = coleo_wide,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_cm[is.na(coleo_cm)] <- 0
+
+str(coleo_cm)
+
+coleo_g_cm <- pivot_wider(
+  data = coleo_g,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_g_cm[is.na(coleo_g_cm)] <- 0
+
+coleo_u_cm <- pivot_wider(
+  data = coleo_u,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_u_cm[is.na(coleo_u_cm)] <- 0
+
+coleo_c_cm <- pivot_wider(
+  data = coleo_c,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_c_cm[is.na(coleo_c_cm)] <- 0
+
+# div per stand all q0
+coleo_inext.all <- aggregate(coleo_cm[, 5:1055],by=list(coleo_cm$stand),sum)
+coleo_stand.mat.all <- t(coleo_inext.all[,-1])
+colnames(coleo_stand.mat.all) <- coleo_inext.all$Group.1
+coleo_stand.list.all <- as.list(as.data.frame(coleo_stand.mat.all))
+
+coleostand1 <- iNEXT(coleo_stand.list.all, q=0, datatype="abundance")
+coleostand1
+
+rich_plot1 <- ggiNEXT(coleostand1)
+rich_plot1
+plot(coleostand1)
+
+p1 = rich_plot1 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  ggtitle("q = 0") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p1
+
+# div per stand g q0
+coleo_inext.g <- aggregate(coleo_g_cm[, 5:693],by=list(coleo_g_cm$stand),sum)
+coleo_stand.mat.g <- t(coleo_inext.g[,-1])
+colnames(coleo_stand.mat.g) <- coleo_inext.g$Group.1
+coleo_stand.list.g <- as.list(as.data.frame(coleo_stand.mat.g))
+
+coleostand2 <- iNEXT(coleo_stand.list.g, q=0, datatype="abundance")
+coleostand2
+
+rich_plot2 <- ggiNEXT(coleostand2)
+rich_plot2
+plot(coleostand2)
+
+p2 = rich_plot2 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  ggtitle("q = 0") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p2
+
+# div per stand u q0
+coleo_inext.u <- aggregate(coleo_u_cm[, 5:458],by=list(coleo_u_cm$stand),sum)
+coleo_stand.mat.u <- t(coleo_inext.u[,-1])
+colnames(coleo_stand.mat.u) <- coleo_inext.u$Group.1
+coleo_stand.list.u <- as.list(as.data.frame(coleo_stand.mat.u))
+
+coleostand3 <- iNEXT(coleo_stand.list.u, q=0, datatype="abundance")
+coleostand3
+
+rich_plot3 <- ggiNEXT(coleostand3)
+rich_plot3
+plot(coleostand3)
+
+p3 = rich_plot3 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  ggtitle("q = 0") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p3
+
+# div per stand c q0
+coleo_inext.c <- aggregate(coleo_c_cm[, 5:330],by=list(coleo_c_cm$stand),sum)
+coleo_stand.mat.c <- t(coleo_inext.c[,-1])
+colnames(coleo_stand.mat.c) <- coleo_inext.c$Group.1
+coleo_stand.list.c <- as.list(as.data.frame(coleo_stand.mat.c))
+
+coleostand4 <- iNEXT(coleo_stand.list.c, q=0, datatype="abundance")
+coleostand4
+
+rich_plot4 <- ggiNEXT(coleostand3)
+rich_plot4
+plot(coleostand4)
+
+p4 = rich_plot4 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  ggtitle("q = 0") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p4
+
+Graph1 <- ggarrange(p1, p2, p3, p4,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph1
+ggsave("outputs/iNEXTSTAND0.png", plot = Graph1, width = 30, height = 20, dpi = 400)
+
+# div per stand all q1
+coleostand5 <- iNEXT(coleo_stand.list.all, q=1, datatype="abundance")
+coleostand5
+
+rich_plot5 <- ggiNEXT(coleostand5)
+rich_plot5
+plot(coleostand5)
+
+p5 = rich_plot5 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  ggtitle("q = 1") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p5
+
+# div per stand g q1
+coleostand6 <- iNEXT(coleo_stand.list.g, q=1, datatype="abundance")
+coleostand6
+
+rich_plot6 <- ggiNEXT(coleostand6)
+rich_plot6
+plot(coleostand6)
+
+p6 = rich_plot6 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  ggtitle("q = 1") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p6
+
+# div per stand u q1
+coleostand7 <- iNEXT(coleo_stand.list.u, q=1, datatype="abundance")
+coleostand7
+
+rich_plot7 <- ggiNEXT(coleostand7)
+rich_plot7
+plot(coleostand7)
+
+p7 = rich_plot7 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  ggtitle("q = 1") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p7
+
+# div per stand c q1
+coleostand8 <- iNEXT(coleo_stand.list.c, q=1, datatype="abundance")
+coleostand8
+
+rich_plot8 <- ggiNEXT(coleostand8)
+rich_plot8
+plot(coleostand8)
+
+p8 = rich_plot8 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  ggtitle("q = 1") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p8
+
+Graph2 <- ggarrange(p5, p6, p7, p8,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph2
+ggsave("outputs/iNEXTSTAND1.png", plot = Graph2, width = 30, height = 20, dpi = 400)
+
+# div per stand all q2
+coleostand9 <- iNEXT(coleo_stand.list.all, q=2, datatype="abundance")
+coleostand9
+View(coleo_stand.list.all)
+rich_plot9 <- ggiNEXT(coleostand9)
+rich_plot9
+plot(coleostand5)
+
+p9 = rich_plot9 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  ggtitle("q = 2") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p9
+
+# div per stand g q2
+coleostand10 <- iNEXT(coleo_stand.list.g, q=2, datatype="abundance")
+coleostand10
+
+rich_plot10 <- ggiNEXT(coleostand10)
+rich_plot10
+plot(coleostand10)
+
+p10 = rich_plot10 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  ggtitle("q = 2") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p10
+
+# div per stand u q2
+coleostand11 <- iNEXT(coleo_stand.list.u, q=2, datatype="abundance")
+coleostand11
+
+rich_plot11 <- ggiNEXT(coleostand11)
+rich_plot11
+plot(coleostand11)
+
+p11 = rich_plot11 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  ggtitle("q = 2") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p11
+
+# div per stand c q2
+coleostand12 <- iNEXT(coleo_stand.list.c, q=2, datatype="abundance")
+coleostand12
+
+rich_plot12 <- ggiNEXT(coleostand12)
+rich_plot12
+plot(coleostand12)
+
+p12 = rich_plot12 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  ggtitle("q = 2") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p12
+
+Graph3 <- ggarrange(p9, p10, p11, p12,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph3
+ggsave("outputs/iNEXTSTAND2.png", plot = Graph3, width = 30, height = 20, dpi = 400)
+
+
+# div per stand type: mix - mono
+coleomix_inext <- aggregate(coleo_cm[, 5:1055],by=list(coleo_cm$stand_type),sum)
+coleomix.mat <- t(coleomix_inext[,-1])
+
+colnames(coleomix.mat) <- coleomix_inext$Group.1
+coleomix.list <- as.list(as.data.frame(coleomix.mat))
+icoleomix <- iNEXT(coleomix.list, q=0, datatype="abundance")
+
+rich_plot4 <- ggiNEXT(icoleomix)
+rich_plot4 
+p4 <- rich_plot4 +
+  labs(x = "Number of individuals", y = "Species richness") +
+  ggtitle("q = 0") +
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  theme(axis.text = element_text(size = 26, color = "black"),
+        axis.title = element_text(size = 26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size = 30),
+        plot.title = element_text(size = 26, color = "black", hjust = 0.5),
+        legend.text = element_text(size = 26),
+        legend.title = element_text(size = 26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5, 1, 0.5, 0.5, "cm"))
+
+icoleomix1 <- iNEXT(coleomix.list, q=1, datatype="abundance")
+rich_plot5 <- ggiNEXT(icoleomix1)
+p5 = rich_plot5 + labs(x = "Number of individuals", y = "Common species diversity") + ggtitle("q = 1") +
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+    theme(axis.text=element_text(size=26, color = "black"),
+          axis.title=element_text(size=26),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+          plot.title = element_text(size=26,color = "black",  hjust=0.5),
+          legend.text=element_text(size=26),
+          legend.title=element_text(size=26),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+  
+icoleomix2 <- iNEXT(coleomix.list, q=2, datatype="abundance")
+rich_plot6 <- ggiNEXT(icoleomix2)
+p6 <- rich_plot6 + labs(x = "Number of individuals", y = "Dominant species diversity") + ggtitle("q = 2")+
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+          axis.title=element_text(size=26),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+          plot.title = element_text(size=26,color = "black",  hjust=0.5),
+          legend.text=element_text(size=26),
+          legend.title=element_text(size=26),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+# combine plots
+Graph.mix <- ggarrange(p4, p5, p6,
+                       ncol = 3, nrow = 1,
+                       labels = c("d)", "e)", "f)"),
+                       font.label = list(size = 25, color = "black"),
+                       common.legend = T, legend = "bottom")
+Graph.mix
+ggsave("outputs/iNEXTMIX.png", plot = Graph.mix, width = 49, height = 15, dpi = 400)
+
+
+# div per strata
+coleostrata_inext <- aggregate(coleo_cm[, 5:1055],by=list(coleo_cm$stratum),sum)
+coleo_stand.mat <- t(coleostrata_inext[,-1])
+colnames(coleo_stand.mat) <- coleostrata_inext$Group.1
+coleo_stand.list <- as.list(as.data.frame(coleo_stand.mat))
+
+coleostand <- iNEXT(coleo_stand.list, q=0, datatype="abundance")
+coleostand
+
+rich_plot1 <- ggiNEXT(coleostand)
+rich_plot1
+plot(coleostand)
+is.na(rich_plot1)
+
+p7 = rich_plot1 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  ggtitle("q = 0") +
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p7
+
+coleostand1 <- iNEXT(coleo_stand.list, q=1, datatype="abundance")
+rich_plot2 <- ggiNEXT(coleostand1)
+plot(coleostand1)
+
+p8 = rich_plot2 + labs(x = "Number of individuals", y = "Common species diversity") +
+  ggtitle("q = 1") +
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+
+
+coleostand2 <-iNEXT(coleo_stand.list, q=2, datatype="abundance")
+rich_plot3 <- ggiNEXT(coleostand2)
+plot(coleostand2)
+
+p9 <- rich_plot3 + labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  ggtitle("q = 2") +
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+Graphs <- ggarrange(p7, p8, p9,
+                    ncol = 3, nrow = 1,
+                    labels = c("a)", "b)", "c)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graphs
+ggsave("outputs/iNEXTSTRATUM.png", plot = Graphs, width = 49, height = 20, dpi = 400)
+
+
+# iNEXT.beta.3D ----
+
+# div per stand all q0
+coleo_stand.list.all <- lapply(coleo_stand.list.all, function(x) as.matrix(x))
+coleostand1 <- iNEXTbeta3D(coleo_stand.list.all, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+rich_plot1 <- ggiNEXTbeta3D(coleostand1)
+p1 <- rich_plot1 + labs(x = "Number of individuals", y = "Species richness") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+p1
+
+# div per stand g q0
+coleo_stand.list.g <- lapply(coleo_stand.list.g, function(x) as.matrix(x))
+coleostand2 <- iNEXTbeta3D(coleo_stand.list.g, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+rich_plot2 <- ggiNEXTbeta3D(coleostand2)
+p2 = rich_plot2 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p2
+
+# div per stand u q0
+coleo_stand.list.u <- lapply(coleo_stand.list.u, function(x) as.matrix(x))
+coleostand3 <- iNEXTbeta3D(coleo_stand.list.u, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+rich_plot3 <- ggiNEXTbeta3D(coleostand3)
+
+p3 = rich_plot3 + 
+  labs(x = "Number of individuals", y = "Species richness") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p3
+
+# div per stand c q0
+coleo_stand.list.c <- lapply(coleo_stand.list.c, function(x) as.matrix(x))
+coleostand4 <- iNEXTbeta3D(coleo_stand.list.c, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+rich_plot4 <- ggiNEXTbeta3D(coleostand4)
+
+p4 = rich_plot4 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p4
+
+Graph4 <- ggarrange(p1, p2, p3, p4,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph4
+ggsave("outputs/iNEXT3DSTAND0.png", plot = Graph4, width = 40, height = 45, dpi = 400)
+
+# div per stand all q1
+coleostand5 <- iNEXTbeta3D(coleo_stand.list.all, diversity = "TD", q=1, datatype="abundance", base	= "size")
+
+rich_plot5 <- ggiNEXTbeta3D(coleostand5)
+p5 <- rich_plot5 + labs(x = "Number of individuals", y = "Common species diversity") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+p5
+
+# div per stand g q1
+coleostand6 <- iNEXTbeta3D(coleo_stand.list.g, diversity = "TD", q=1, datatype="abundance", base	= "size")
+
+rich_plot6 <- ggiNEXTbeta3D(coleostand6)
+p6 = rich_plot6 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p6
+
+# div per stand u q1
+coleo_stand.list.u <- lapply(coleo_stand.list.u, function(x) as.matrix(x))
+coleostand7 <- iNEXTbeta3D(coleo_stand.list.u, diversity = "TD", q=1, datatype="abundance", base	= "size")
+
+rich_plot7 <- ggiNEXTbeta3D(coleostand7)
+
+p7 = rich_plot7 + 
+  labs(x = "Number of individuals", y = "Common species diversity") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p7
+
+# div per stand c q1
+coleostand8 <- iNEXTbeta3D(coleo_stand.list.c, diversity = "TD", q=1, datatype="abundance", base	= "size")
+
+rich_plot8 <- ggiNEXTbeta3D(coleostand8)
+
+p8 = rich_plot8 + 
+  labs(x = "Number of individuals", y = "Common species diversity") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p8
+
+Graph5 <- ggarrange(p5, p6, p7, p8,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph5
+ggsave("outputs/iNEXT3DSTAND1.png", plot = Graph5, width = 40, height = 45, dpi = 400)
+
+# div per stand all q2
+coleostand5 <- iNEXTbeta3D(coleo_stand.list.all, diversity = "TD", q=2, datatype="abundance", base	= "size")
+
+rich_plot9 <- ggiNEXTbeta3D(coleostand9)
+p9 <- rich_plot9 + labs(x = "Number of individuals", y = "Dominant species diversity") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+p9
+
+# div per stand g q1
+coleostand10 <- iNEXTbeta3D(coleo_stand.list.g, diversity = "TD", q=2, datatype="abundance", base	= "size")
+
+rich_plot10 <- ggiNEXTbeta3D(coleostand10)
+p10 = rich_plot10 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p10
+
+# div per stand u q2
+coleo_stand.list.u <- lapply(coleo_stand.list.u, function(x) as.matrix(x))
+coleostand11 <- iNEXTbeta3D(coleo_stand.list.u, diversity = "TD", q=2, datatype="abundance", base	= "size")
+
+rich_plot11 <- ggiNEXTbeta3D(coleostand11)
+
+p11 = rich_plot11 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") +
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p11
+
+# div per stand c q2
+coleostand12 <- iNEXTbeta3D(coleo_stand.list.c, diversity = "TD", q=2, datatype="abundance", base	= "size")
+
+rich_plot12 <- ggiNEXTbeta3D(coleostand12)
+
+p12 = rich_plot12 + 
+  labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  scale_fill_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_color_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  scale_shape_discrete(labels=c("Douglas fir", "Be-Dgl", "European beech", "Be-Spr", "Norway Spruce")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=36),
+        legend.title=element_text(size=36),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p12
+
+Graph6 <- ggarrange(p9, p10, p11, p12,
+                    ncol = 2, nrow = 2,
+                    labels = c("a)", "b)", "c)", "d)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graph6
+ggsave("outputs/iNEXT3DSTAND2.png", plot = Graph6, width = 40, height = 45, dpi = 400)
+
+# div per stand type: mix - mono
+coleomix.list <- lapply(coleomix.list, function(x) as.matrix(x))
+icoleomix1 <- iNEXTbeta3D(coleomix.list, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+coleomixplot1 <- ggiNEXTbeta3D(icoleomix1)
+
+p13 <- coleomixplot1 +
+  labs(x = "Number of individuals", y = "Species richness") +
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  theme(axis.text = element_text(size = 26, color = "black"),
+        axis.title = element_text(size = 26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size = 30),
+        plot.title = element_text(size = 26, color = "black", hjust = 0.5),
+        legend.text = element_text(size = 26),
+        legend.title = element_text(size = 26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5, 1, 0.5, 0.5, "cm"))
+
+icoleomix2 <- iNEXTbeta3D(coleomix.list, diversity = "TD", q=1, datatype="abundance", base	= "size")
+coleomixplot2 <- ggiNEXTbeta3D(icoleomix2)
+
+p14 = coleomixplot2  + labs(x = "Number of individuals", y = "Common species diversity") + 
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+icoleomix3 <- iNEXTbeta3D(coleomix.list, diversity = "TD", q=2, datatype="abundance", base	= "size")
+coleomixplot3 <- ggiNEXTbeta3D(icoleomix3)
+p15 <- coleomixplot3 + labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  scale_color_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  scale_fill_manual(values = c("mono" = "chartreuse4", "mix" = "chartreuse2")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+# combine plots
+Graph.mix <- ggarrange(p13, p14, p15,
+                       ncol = 3, nrow = 1,
+                       labels = c("d)", "e)", "f)"),
+                       font.label = list(size = 25, color = "black"),
+                       common.legend = T, legend = "bottom")
+Graph.mix
+ggsave("outputs/iNEXT3DMIX.png", plot = Graph.mix, width = 30, height = 30, dpi = 400)
+
+
+# div per strata
+coleostrata.list <- lapply(coleo_stand.list, function(x) as.matrix(x))
+icoleostrata1 <- iNEXTbeta3D(coleostrata.list, diversity = "TD", q=0, datatype="abundance", base	= "size")
+
+coleostrataplot1 <- ggiNEXTbeta3D(icoleostrata1)
+
+p16 = coleostrataplot1 + 
+  labs(x = "Number of individuals", y = "Species richness") + 
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+p16
+
+icoleostrata2 <- iNEXTbeta3D(coleostrata.list, diversity = "TD", q=1, datatype="abundance", base	= "size")
+coleostrataplot2 <- ggiNEXTbeta3D(icoleostrata2)
+p17 = coleostrataplot2 + labs(x = "Number of individuals", y = "Common species diversity") + 
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+icoleostrata3 <- iNEXTbeta3D(coleostrata.list, diversity = "TD", q=2, datatype="abundance", base	= "size")
+coleostrataplot3 <- ggiNEXTbeta3D(icoleostrata3)
+p18 <- coleostrataplot3 + labs(x = "Number of individuals", y = "Dominant species diversity") + 
+  scale_fill_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_color_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  scale_shape_discrete(labels=c("Ground", "Understorey", "Canopy")) +
+  theme(axis.text=element_text(size=26, color = "black"),
+        axis.title=element_text(size=26),
+        axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =30),
+        plot.title = element_text(size=26,color = "black",  hjust=0.5),
+        legend.text=element_text(size=26),
+        legend.title=element_text(size=26),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"),
+        plot.margin = margin(0.5,1,0.5,0.5, "cm"))
+
+Graphs <- ggarrange(p16, p17, p18,
+                    ncol = 3, nrow = 1,
+                    labels = c("a)", "b)", "c)"),
+                    font.label = list(size = 25, color = "black"),
+                    common.legend = T, legend = "bottom")
+Graphs
+ggsave("outputs/iNEXT3DSTRATUM.png", plot = Graphs, width = 40, height = 30, dpi = 400)
+
+coleostand1 <- iNEXTbeta3D(coleo_stand.list.all, diversity = "TD", datatype="abundance", base	= "coverage")
+coleostand1
+
+# Esempio di calcolo della copertura campionaria per i tuoi dati
+coverage_plot <- iNEXT(coleo_stand.list.all, q = 0, datatype = "abundance", endpoint = 200)
+ggiNEXT(coverage_plot)
+
+
+ggiNEXTbeta3D(coleostand1,	type	= "B")	
+
+out <- iNEXTbeta3D(coleo_stand.list.all, diversity = "TD", datatype = "abundance", base	= "coverage", level = 0.9)
+ggiNEXTbeta3D(out,	type	= "B")	
+
+coleostand1
+View(coleostand1)
+	
+ggiNEXTbeta3D(coleostand1,	type	= "D")
+
+
+
+# FD ----
+# guild diversity
+View(coleo)
+
+coleo_fd <- coleo %>%
+  filter(!is.na(Feeding_guild) & !is.na(bodymass))
+coleo_fd <- coleo_fd[,c(10, 17, 18, 24)]
+coleo_fd <- coleo_fd %>%
+  distinct(species, .keep_all = TRUE)
+coleo_fd <- as.data.frame(coleo_fd)
+rownames(coleo_fd) <- coleo_fd[[1]]
+coleo_fd <- coleo_fd[,c(-1,-4)]
+str(coleo_fd)
+coleo_fd$Feeding_guild <- as.factor(coleo_fd$Feeding_guild)
+
+coleo_trap <- coleo %>%
+  filter(!is.na(Feeding_guild) & !is.na(bodymass))
+coleo_trap <- coleo_trap %>%
+  distinct(species, .keep_all = TRUE)
+coleo_trap <- coleo_trap[,c(10, 11, 24)]
+coleo_trap <- pivot_wider(
+  data = coleo_trap,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_trap[is.na(coleo_trap)] <- 0
+coleo_trap <- as.data.frame(coleo_trap)
+rownames(coleo_trap) <- coleo_trap[,"trapID"]
+coleo_trap <- coleo_trap[,-1]
+
+
+FD <- dbFD(coleo_fd, coleo_trap, calc.FRic=TRUE, calc.CWM=TRUE, stand.FRic = TRUE) # stand.FRic for standardizing FRIC
+
+coleo_FD <- coleo_trap
+
+coleo_FD$nbsp <- FD$nbsp
+coleo_FD$FRic <- FD$FRic
+coleo_FD$FEve <- FD$FEve
+coleo_FD$FDiv <- FD$FDiv
+coleo_FD$FDis <- FD$FDis
+coleo_FD$RaoQ <- FD$RaoQ
+coleo_FD$CWMFD <- FD$CWM[,"Feeding_guild"]
+coleo_FD$CWMB <- FD$CWM[,"bodymass"]
+
+coleo_FD <- rownames_to_column(coleo_FD, var = "trapID")
+
+# Species pairwise distance matrix creation 
+coleo_fd <- rownames_to_column(coleo_fd, var = "species")
+# Compute Gower distance
+gower_dist <- daisy(coleo_fd[, -1], metric = "gower")
+# Convert to matrix form
+gower_matrix <- as.matrix(gower_dist)
+# Assign row and column names (species names)
+rownames(gower_matrix) <- coleo_fd$species
+colnames(gower_matrix) <- coleo_fd$species
+
+
+coleo_inext_fd <- coleo %>%
+  filter(!is.na(Feeding_guild) & !is.na(bodymass))
+
+coleo_inext_fd <- coleo_inext_fd[c(5,10,11,15,24,25)]
+coleo_fd_g <- coleo_inext_fd[coleo_inext_fd$stratum == "1", ]
+coleo_fd_u <- coleo_inext_fd[coleo_inext_fd$stratum == "2", ]
+coleo_fd_c <- coleo_inext_fd[coleo_inext_fd$stratum == "3", ]
+
+data(Brazil_rainforests)
+str(Brazil_rainforests)
+View(Brazil_rainforests)
+
+# FD
+# Creare una lista divisa per stand
+listcreated <- coleo_fd_c %>%
+  split(.$stand)
+
+listcreated <- as.data.frame(listcreated)
+
+listcreated <- lapply(listcreated, function(x) {
+  # Rimuovi le colonne non necessarie
+  x <- x %>% select(-stand, -stratum, -trapID, -stand_type)
+  
+  # Somma le abbondanze delle specie duplicate
+  x <- x %>%
+    group_by(species) %>%
+    summarise(abundance = sum(abundance), .groups = 'drop') # .groups = 'drop' per evitare avvisi
+  
+  # Converti in data.frame per poter usare i nomi delle righe
+  x <- as.data.frame(x)
+  
+  # Imposta i nomi delle righe usando la colonna 'species'
+  rownames(x) <- x$species
+  
+  # Rimuovi la colonna 'species' (ma i nomi rimangono come rownames)
+  x <- x[, -which(names(x) == "species")]
+  
+  # Converti in matrice
+  x_mat <- as.matrix(x)
+  
+  return(x_mat)
+})
+# Verifica la struttura del risultato
+str(listcreated)
+View(listcreated)
+output_FDc_abun	= iNEXTbeta3D(data	=	listcreated,	diversity	= 'FD',	q = 1,
+                              datatype	= "abundance",	base	= 'coverage',	nboot	= 10,	
+                              FDdistM	=	gower_matrix,	FDtype	= 'AUC',	FDcut_number	= 30)
+
+View(listcreated)
+##	Coverage-based	R/E	sampling	curves	for	functional	gamma,	alpha	and	beta	diversity
+ggiNEXTbeta3D(output_FDc_abun,	type	= 'B')
+
+##	Data	information	for	taxonomic	diversity
+DataInfobeta3D(data	=	coleo_stand.mat.all,	diversity	= 'TD',	datatype	= 'abundance')
+
+##	Data	information	for	functional	diversity	(under	a	specified	threshold	level,	FDtype	=	
+'tau_value')
+DataInfobeta3D(data	=	coleo_stand.mat.all,	diversity	= 'FD',	datatype	= 'abundance',	
+               FDdistM	=	gower_matrix,	FDtype	= 'tau_value',	FDtau	= NULL)
+
+##	Data	information	for	functional	diversity	(FDtype	=	'AUC')
+DataInfobeta3D(data	=	coleo_stand.mat.all,	diversity	= 'FD',	datatype	= 'abundance',	
+               FDdistM	=	gower_matrix,	FDtype	= 'AUC')
+
+# SR ABU trap ----
+SR <- specnumber(coleo_cm[,5:1055])
+ABU <- rowSums(coleo_cm[,5:1055])
+SW <- diversity(coleo_cm[,5:1055])
+Eve <- ((coleo_cm[,5:1055])/(log(SR)))
+
+# Rarefaction
+View(coleo_cm)
+coleo_rar <- coleo_cm[,5:1055]
+raremax <- min(rowSums(coleo_rar))
+Srare <- rarefy(coleo_rar, raremax)
+View(Srare)
+plot(coleo_cm$SR, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+rarecurve(coleo_rar, step = 20, sample = raremax, col = "blue", cex = 0.6)
+
+write.table(cbind(SR, ABU, SW, Eve, Srare), file="outputs/coleo_trap_div.csv", sep = ";", dec = ".", row.names = FALSE)
+
+# guild diversity
+coleo_fg <- coleo[!is.na(coleo$Feeding_guild), ]
+
+# "feeding" and "species" col merged 
+coleo_fg <- coleo_fg %>%
+  unite("feeding_species", c("Feeding_guild", "species"), sep = "_")
+
+View(coleo_fg)
+# Pivota il dataframe trap level -> community matrix
+coleo_fg <- pivot_wider(
+  data = coleo_fg[,c(10,11,23,24)],
+  names_from = feeding_species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+# NAs in 0
+coleo_fg[is.na(coleo_fg)] <- 0
+
+
+SR_carni <- specnumber(select(coleo_fg, starts_with("c")))
+SW_carni <- diversity(select(coleo_fg, starts_with("c")))
+Eve_carni <- (SW_carni/(log(SR)))
+
+SR_herbi <-  specnumber(select(coleo_fg, starts_with("h")))
+SW_herbi <-  diversity(select(coleo_fg, starts_with("h")))
+Eve_herbi <- (SW_herbi)/(log(SR))
+
+SR_omni <- specnumber(select(coleo_fg, starts_with("o")))
+SW_omni <- diversity(select(coleo_fg, starts_with("o")))
+Eve_omni <- (SW_omni)/(log(SR))
+
+SR_myc_detr <- specnumber(select(coleo_fg, starts_with("m")))
+SW_myc_detr <- diversity(select(coleo_fg, starts_with("m")))
+Eve_myc_detr <- (SW_myc_detr)/(log(SR))
+
+o1 = as.data.frame(SR_carni)
+o2 = as.data.frame(SW_carni)
+o3 = as.data.frame(Eve_carni)
+o4 = as.data.frame(SR_herbi)
+o5 = as.data.frame(SW_herbi)
+o6 = as.data.frame(Eve_herbi)
+o7 = as.data.frame(SR_omni)
+o8 = as.data.frame(SW_omni)
+o9 = as.data.frame(Eve_omni)
+o10 = as.data.frame(SR_myc_detr)
+o11 = as.data.frame(SW_myc_detr)
+o12 = as.data.frame(Eve_myc_detr)
+
+guilds = cbind(o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12)
+guilds
+
+# addipart and multipart ----
+
+# x stand
+# Creating level matrix
+# Numero di stand, altezze e plot
+num_stand <- 5
+num_height <- 3
+num_plot <- 40
+num_trap_height1 <- 12
+num_trap_height2 <- 3
+num_trap_height3 <- 3
+
+# Costruisci il dataframe per trappole di altezza 1
+stand_1 <- rep(1:num_stand, each = num_trap_height1 * num_plot / num_stand)
+plot_1 <- rep(1:num_plot, each = num_trap_height1)
+height_1 <- rep(1, length(stand_1))
+trap_1 <- rep(1:num_trap_height1, times = num_plot)
+
+# Costruisci il dataframe per trappole di altezza 2
+stand_2 <- rep(1:num_stand, each = num_trap_height2 * num_plot / num_stand)
+plot_2 <- rep(1:num_plot, each = num_trap_height2)
+height_2 <- rep(2, length(stand_2))
+trap_2 <- rep(1:num_trap_height2, times = num_plot)
+
+# Costruisci il dataframe per trappole di altezza 3
+stand_3 <- rep(1:num_stand, each = num_trap_height3 * num_plot / num_stand)
+plot_3 <- rep(1:num_plot, each = num_trap_height3)
+height_3 <- rep(3, length(stand_3))
+trap_3 <- rep(1:num_trap_height3, times = num_plot)
+
+# Combina tutti i dati
+stand <- c(stand_1, stand_2, stand_3)
+plot <- c(plot_1, plot_2, plot_3)
+height <- c(height_1, height_2, height_3)
+trap <- c(trap_1, trap_2, trap_3)
+
+# Crea la matrice finale
+level2 <- data.frame(Stand = stand, Plot = plot, Height = height, Trap = trap)
+
+# Controlla la struttura della matrice
+str(leveld)
+
+# Visualizza i primi dati
+head(leveld)
+View(level2)
+leveld <- level2[which(level2$stand=='1'), ]
+levelbd <- level2[which(level2$stand=='2'), ]
+levelb <- level2[which(level2$stand=='3'), ]
+levelbs <- level2[which(level2$stand=='4'), ]
+levels <- level2[which(level2$stand=='5'), ]
+
+# oreder dataframe per stand 
+indici_ordine <- order(coleo_cm$stand, coleo_cm$trapID)
+coleo_addi <- coleo_cm[indici_ordine, ]
+
+
+last_row_stand1 <- max(which(coleo_addi$stand == 1))
+last_row_stand2 <- max(which(coleo_addi$stand == 2))
+last_row_stand3 <- max(which(coleo_addi$stand == 3))
+last_row_stand4 <- max(which(coleo_addi$stand == 4))
+last_row_stand5 <- max(which(coleo_addi$stand == 5))
+
+coleo_addi <- coleo_addi[, 5:1055]
+#Douglas
+specd <- coleo_addi[1:126, ]
+#Beech-Douglas
+specbd <- coleo_addi[127:254, ]
+#Beech
+specb <- coleo_addi[255:381, ]
+#Beech-Spruce
+specbs <- coleo_addi[382:509, ]
+#Spruce
+specs <- coleo_addi[510:637, ]
+
+# only trap level
+adipart(specd, index="richness", nsimul=999)
+adipart(specbd, index="richness", nsimul=999)
+adipart(specb, index="richness", nsimul=999)
+adipart(specbs, index="richness", nsimul=999)
+adipart(specs, index="richness", nsimul=999)
+
+
+Douglas_multipart <- multipart(specd, leveld, index="renyi", 
+                               scales=1, nsimul=999)
+
+BeechDouglas_multipart <- multipart(specbd, levelbd, index="renyi", 
+                                    scales=1, nsimul=999)
+Beech_multipart <- multipart(specb, levelb, index="renyi", 
+                             scales=1, nsimul=999)
+BeechNorway_multipart <- multipart(specbs, levelbs, index="renyi", 
+                                   scales=1, nsimul=999)
+Norway_multipart <- multipart(specs, levels, index="renyi", 
+                              scales=1, nsimul=999)
+
+
+
+
+
+# Indicator species ----
+library(indicspecies)
+df=subset(coleo_env, select = -c(1:22) )
+head(df)
+Zonation=multipatt(df,coleo_env$stand, duleg = T)
+Zonation2=multipatt(df,coleo_env$stand)
+
+{
+  Zonation$sign
+  p.adj <- round(p.adjust(Zonation$sign$p.value, method = "hommel"),3)
+  names(p.adj) <- "p.adj"
+  cbind(Zonation$sign, p.adj)
+  Zonation.adj <- Zonation
+  Zonation.adj$sign$p.value <- p.adj
+  summary(Zonation.adj)
+}
+
+output=capture.output(summary(Zonation))
+summary((Zonation2))
+
+summary(Zonation, indvalcomp= TRUE)
+
+write.table(output, file="outputs/Indicator_species.csv", sep = ";", dec = ".", row.names = T)
+
+# Indi 2----
+library(indicspecies)
+
+Abundanzmatrix_indval <- matrix_plot[,2:49]
+
+set.seed(123)
+
+indval <- multipatt(Abundanzmatrix_indval, matrix_plot$stand,duleg = TRUE,
+                    control = how(within = Within(type = "free"),
+                                  plots = Plots(type = "none"),
+                                  blocks = matrix_plot$location,
+                                  nperm = 999,
+                                  observed = TRUE)) 
+
+print(indval)
+summary(indval) 
+summary(indval, indvalcomp=TRUE)
+indval$sign
+
+
+
+# NMDS ----
+# stress value < 0.2
+# trap level
+coleo_wide2 <- coleo[c(5,7,10,11,15,24,25)]
+coleo_wide2 <- coleo_wide2 %>%
+  group_by(trapID, species, stand, stratum, stand_type, plot) %>%
+  summarise(abundance = sum(abundance), .groups = 'drop')
+coleo_cm2 <- pivot_wider(
+  data = coleo_wide2,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_cm2[is.na(coleo_cm2)] <- 0
+
+str(coleo_cm2)
+coleo_cm2_g <- coleo_cm2 %>%
+  filter(stratum == "1")
+
+coleo_cm2_u <- coleo_cm2 %>%
+  filter(stratum == "2")
+
+coleo_cm2_c <- coleo_cm %>%
+  filter(stratum == "3")
+
+# Rimuovi le righe duplicate basate su 'plot'
+env <- env %>%
+  distinct(plot, .keep_all = TRUE)
+
+coleo_env_wide <- merge(coleo_cm2, env, by = "plot", all.x = TRUE)
+
+coleo_env_wide_g <- coleo_env_wide %>%
+  filter(stratum == "1")
+coleo_env_wide_u <- coleo_env_wide %>%
+  filter(stratum == "2")
+coleo_env_wide_c <- coleo_env_wide %>%
+  filter(stratum == "3")
+
+coleo_cm_NMDS_trap <- coleo_cm2[, c(-1,-2,-3,-4,-5)]
+
+# nMDS per stand all
+nmd_trap <- metaMDS(coleo_cm_NMDS_trap, k=2, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap,groups=coleo_env_wide$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                           "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                           "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                           "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap)
+
+# nMDS per stand g
+coleo_cm_NMDS_trap_g <- coleo_cm2_g[, c(-1,-2,-3,-4,-5)]
+
+nmd_trap_g <- metaMDS(coleo_cm_NMDS_trap_g, k=2, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap_g,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap_g,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap_g,groups=coleo_env_wide_g$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_g[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                           "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                           "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                           "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap_g,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap_g)
+
+# nMDS per stand u
+coleo_cm_NMDS_trap_u <- coleo_cm2_u[, c(-1,-2,-3,-4,-5)]
+
+nmd_trap_u <- metaMDS(coleo_cm_NMDS_trap_u, k=3, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap_u,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap_u,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap_u,groups=coleo_env_wide_u$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_u[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                             "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                             "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                             "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap_u,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap_u)
+
+# nMDS per stand c
+coleo_cm_NMDS_trap_c <- coleo_cm2_c[, c(-1,-2,-3,-4,-5)]
+
+nmd_trap_c <- metaMDS(coleo_cm_NMDS_trap_c, k=3, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap_c,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap_c,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap_c,groups=coleo_env_wide_c$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_c[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                             "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                             "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                             "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap_c,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap_c)
+
+
+# nMDS per height all
+View(coleo_cm_NMDS_trap)
+View(coleo_env_wide)
+nmd_trap <- metaMDS(coleo_cm_NMDS_trap, k=2, dist="horn")
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+plot(nmd_trap,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  ordiellipse(nmd_trap,groups=coleo_env_wide$stratum,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#dc267f"),label=F)
+  legend("topleft",c("Ground","Understorey","Canopy"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                           "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                           "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                           "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap)
+
+# plot level
+coleo_wide3 <- coleo[c(5,7,10,11,15,24,25)]
+# all
+coleo_wide3_all <- coleo_wide3 %>%
+  group_by(species, plot,stand) %>%
+  summarise(abundance = sum(abundance), .groups = 'drop')
+coleo_cm3_all <- pivot_wider(
+  data = coleo_wide3_all,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_cm3_all[is.na(coleo_cm3_all)] <- 0
+View(coleo_cm3_all)
+
+# stratum
+coleo_wide3_str <- coleo_wide3 %>%
+  group_by(species, plot, stratum, stand) %>%
+  summarise(abundance = sum(abundance), .groups = 'drop')
+
+coleo_cm3_str <- pivot_wider(
+  data = coleo_wide3_str,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+coleo_cm3_str[is.na(coleo_cm3_str)] <- 0
+
+# g
+coleo_cm3_g <- coleo_cm3_str %>%
+  filter(stratum == "1")
+# u
+coleo_cm3_u <- coleo_cm3_str %>%
+  filter(stratum == "2")
+# c
+coleo_cm3_c <- coleo_cm3_str %>%
+  filter(stratum == "3")
+
+coleo_env_wide_plot <- merge(coleo_cm3_all, env, by = "plot", all.x = TRUE)
+coleo_env_wide_plot_g <- merge(coleo_cm3_g, env, by = "plot", all.x = TRUE)
+coleo_env_wide_plot_u <- merge(coleo_cm3_u, env, by = "plot", all.x = TRUE)
+coleo_env_wide_plot_c <- merge(coleo_cm3_c, env, by = "plot", all.x = TRUE)
+
+
+# nMDS per stand all
+coleo_cm_NMDS_plot_all <- coleo_cm3_all[, c(-1,-2)]
+
+nmd_plot_all <- metaMDS(coleo_cm_NMDS_plot_all, k=2, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_plot_all,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_plot_all,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_plot_all,groups=coleo_env_wide_plot$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_plot[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                           "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                           "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                           "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_plot_all,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap)
+
+# nMDS per stand g
+coleo_cm_NMDS_plot_c <- coleo_cm3_c[, c(-1,-2,-3)]
+nmd_plot_c <- metaMDS(coleo_cm_NMDS_plot_c, k=3, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_plot_c,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_plot_c,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_plot_c,groups=coleo_env_wide_plot_c$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_plot_c[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                                "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                                "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                                "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_plot_c,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap)
+
+# nMDS per stand u
+coleo_cm_NMDS_trap_u <- coleo_cm2_u[, c(-1,-2,-3,-4,-5)]
+
+nmd_trap_u <- metaMDS(coleo_cm_NMDS_trap_u, k=3, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap_u,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap_u,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap_u,groups=coleo_env_wide_u$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_u[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                             "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                             "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                             "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap_u,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap_u)
+
+# nMDS per stand c
+coleo_cm_NMDS_trap_c <- coleo_cm2_c[, c(-1,-2,-3,-4,-5)]
+
+nmd_trap_c <- metaMDS(coleo_cm_NMDS_trap_c, k=3, dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd_trap_c,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap_c,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap_c,groups=coleo_env_wide_c$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide_c[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                             "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                             "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                             "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap_c,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap_c)
+
+
+# nMDS per height all
+View(coleo_cm_NMDS_trap)
+View(coleo_env_wide)
+nmd_trap <- metaMDS(coleo_cm_NMDS_trap, k=2, dist="horn")
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+plot(nmd_trap,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  ordiellipse(nmd_trap,groups=coleo_env_wide$stratum,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#dc267f"),label=F)
+  legend("topleft",c("Ground","Understorey","Canopy"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env_wide[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", 
+                           "cv_canopy_height", "stand_type", "N_S_2", "openness", "total_deadwood_volume",
+                           "ENL0.mean", "mean_canopy_height", "total_gap_area", "sum", "whole_tree", "sum_30",
+                           "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu", "Summe_MH_larrieu")]
+  envir<-envfit(nmd_trap,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd_trap)
