@@ -1,0 +1,1550 @@
+library(reshape2)
+library(vegan)
+library(tidyverse)
+library(dplyr) # for data management and functions
+library(FD)
+library(tidyr)
+library(iNEXT)
+library(ggpubr)
+library(indicspecies)
+library(iNEXT.3D)
+library(iNEXT.beta3D)
+library(tibble)
+library(cluster)
+
+# coleo understorey ----
+traits_data_gm <- read.table("data/ArthropodSpeciesTraits_GM.txt", header = TRUE, sep = "\t")
+traits_data_s <- read.csv("data/ArthropodSpeciesTraits_S.csv", sep = ",")
+traits_data_h <- read.csv("data/ArthropodSpeciesTraits_H.csv", sep = ",")
+coleo_data <- read.csv("data/coleo_FITs19_clean_family.csv", sep = ";")
+traits_data_w <- read.csv("data/coleo_FITs21_species_TRAITS_RL_DET.csv", sep = ";")
+#endangered1 <- read.csv("data/endangered1.csv", sep = ";")
+#endangered2 <- read.csv("data/endangered2.csv", sep = ";")
+#endangered3 <- read.csv("data/endangered3.csv", sep = ";")
+#endangered4 <- read.csv("data/endangered4.csv", sep = ";")
+#endangered5 <- read.csv("data/endangered5.csv", sep = ";")
+#endangered6 <- read.csv("data/endangered6.csv", sep = ";")
+#endangered7 <- read.csv("data/endangered7.csv", sep = ";")
+#endangered8 <- read.csv("data/endangered8.csv", sep = ";")
+
+# Subset function used to remove rows with spec. in epitheton column 
+coleo_data <- subset(coleo_data, !grepl("spec.", epitheton))
+
+# Matching column names for species 
+colnames(traits_data_gm)[colnames(traits_data_gm) == "SpeciesID"] <- "species"
+colnames(traits_data_s)[colnames(traits_data_s) == "SpeciesID"] <- "species"
+colnames(traits_data_w)[colnames(traits_data_w) == "Species"] <- "species"
+
+# Replace the underscore with a space in species column
+traits_data_h$species <- gsub("_", " ", traits_data_h$species)
+
+# Manipulating endangered datasets
+#endangered1 <- endangered1[, c("Name", "RL.Kat.")]
+#endangered1$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered1$Name)
+#endangered1$Name <- gsub(",\\s\\d+$", "", endangered1$Name)
+#endangered2 <- endangered2[, c("Name", "RL.Kat.")]
+#endangered2$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered2$Name)
+#endangered3 <- endangered3[, c("Name", "RL.Kat.")]
+#endangered3$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered3$Name)
+#endangered4 <- endangered4[, c("Name", "RL.Kat.")]
+#endangered4$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered4$Name)
+#endangered5 <- endangered5[, c("Name", "RL.Kat.")]
+#endangered5$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered5$Name)
+#endangered6 <- endangered6[, c("Name", "RL.Kat.")]
+#endangered6$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered6$Name)
+#endangered7 <- endangered7[, c("Name", "RL.Kat.")]
+#endangered7$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered7$Name)
+#endangered8 <- endangered8[, c("Name", "RL.Kat.")]
+#endangered8$Name <- gsub("\\s?\\(.*?\\)|\\s\\w+,\\s\\d+$|\\s\\(.*?\\)", "", endangered8$Name)
+#endangered <- rbind(endangered1, endangered2, endangered3, endangered4, endangered5, endangered6, endangered7, endangered8)
+#colnames(endangered)[colnames(endangered) == "Name"] <- "species"
+
+
+# Checking for synonyms - s/h 
+#any(traits_data_gm$species == "Lathridius bifasciatus")
+# gm s w
+
+# https://eunis.eea.europa.eu/species/231786
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cryptophagus cylindrus", "Cryptophagus parallelus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cryptophagus pilosus", "Cryptophagus pallidus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cryptophagus dentatus", "Cryptophagus punctipennis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Eusphalerum abdominale", "Eusphalerum semicoleoptratum", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Cis jacquemartii", "Cis jaquemarti", species))
+
+# GBIF
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Xyleborus saxeseni", "Xyleborinus saxesenii", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cis nitidus", "Sulcacis nitidus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Rhizophagus parvulus", "Rhizophagus fenestralis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Hedobia imperialis", "Ptinomorphus imperialis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anthribus albinus", "Platystomos albinus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Pityophthorus lichtensteini", "Pityophthorus lichtensteinii", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Orthoperus mundus", "Orthoperus corticalis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Nemosoma elongatum", "Nemozoma elongatum", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Mycetochara linearis", "Mycetochara maura", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Dirhagus pygmaeus", "Microrhagus pygmaeus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Melanotus rufipes", "Melanotus villosus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Malthinus punctatus", "Malthinus flaveolus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Xestobium plumbeum", "Hyperisus plumbeum", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anobium fulvicorne", "Hemicoelus fulvicornis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anobium costatum", "Hemicoelus costatus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anobium pertinax", "Hadrobregmus pertinax", species))
+traits_data_w <- traits_data_w %>%
+  mutate(species = ifelse(species == "Cryptophagus cylindrus", "Cryptophagus cylindrellus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Corticarina obfuscata", "Corticarina parvula", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Ampedus aethiops", "Ampedus scrofa", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Octotemnus glabriculus", "Octotemnus glabricornis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Rhynchaenus quercus", "Orchestes quercus", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Ampedus aethiops", "Ampedus scrofa", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Acrossus depressus", "Aphodius depressus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Atheta nigricornis", "Atheta vaga", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Philonthus fimetarius", "Bisnius fimetarius", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Ceutorhynchus floralis", "Ceutorhynchus typhae", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Cis rugulosus", "Cis boleti/rugulosus", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Hylesinus varius", "Corticarina minuta", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cortinicara gibbosa", "Cortinicara gibbosa/similata", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cryptophagus pallidus", "Cryptophagus reflexus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Limonius poneli", "Limonius minutus/poneli", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Megasternum immaculatum", "Megasternum concinnum", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Nargus wilkinii", "Nargus wiklini", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Necrophorus fossor", "Nicrophorus interruptus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Necrophorus vespilloides", "Nicrophorus vespilloides", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Rhynchaenus fagi", "Orchestes fagi", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Ocypus compressus", "Tasgius morsitans", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Peltis ferruginea", "Ostoma ferruginea", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Sitona lineatus", "Sitona lineata", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Tachinus signatus", "Tachinus rufipes", species))
+
+# NBNATLAS
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Xyloterus domesticus", "Trypodendron domesticum", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Hylecoetus dermestoides", "Elateroides dermestoides", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cryphalus abietis", "Cryphalus asperatus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Corticarina fuscula", "Corticarina minuta", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Orthocis vestivus", "Cis vestivus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Orthocis festivus", "Cis festivus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Cis rugulosus", "Cis boleti/rugulosus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Atomaria elongatula", "Atomaria alpina", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Brachytarsus nebulosus", "Anthribus nebulosus", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Xyleborus dispar", "Anisandrus dispar", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anaspis thoracica", "Anaspis septentrionalis", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Anaspis ruficollis", "Anaspis regimbarti", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Otiorhynchus scaber", "Otiorhynchus carinatopunctatus", species))
+traits_data_h <- traits_data_h %>%
+  mutate(species = ifelse(species == "Anaspis ruficollis", "Anaspis regimbarti", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Leperisinus fraxini", "Hylesinus varius", species))
+traits_data_s <- traits_data_s %>%
+  mutate(species = ifelse(species == "Bythinus burrelli", "Bythinus burrellii", species))
+
+# Selection of the new columns to add 
+body_size_gm <- traits_data_gm[, c("species", "Body_Size")]
+body_size_s <- traits_data_s[, c("species", "Mean_BodySize")]
+mean_body_size_h <- traits_data_h[, c("species", "mean_body_length_literature")]
+body_size_h <- traits_data_h[, c("species", "body_length")]
+fg_s <- traits_data_s[, c("species", "Feeding_guild")]
+fg_w <- traits_data_w[, c("species", "Guil_prio_Staab")]
+
+# Adding the selected column to my data 
+coleo_data_traits <- merge(coleo_data, body_size_gm, by = "species", all.x = TRUE)
+coleo_data_traits <- merge(coleo_data_traits, body_size_s, by = "species", all.x = TRUE) # best one with all bodysize
+coleo_data_traits <- merge(coleo_data_traits, mean_body_size_h, by = "species", all.x = TRUE) 
+coleo_data_traits <- merge(coleo_data_traits, body_size_h, by = "species", all.x = TRUE)
+coleo_data_traits <- merge(coleo_data_traits, fg_s, by = "species", all.x = TRUE)
+coleo_data_traits <- merge(coleo_data_traits, fg_w, by = "species", all.x = TRUE)
+#coleo_data_traits <- merge(coleo_data_traits, endangered, by = "species", all.x = TRUE)
+
+# Column of interest
+col_data <- c("Body_Size", "Mean_BodySize", "mean_body_length_literature")
+
+# Creation of a new column (bodyzise) with unified columns 
+coleo_data_traits$bodysize <- apply(coleo_data_traits[col_data], 1, function(row) {
+  valori_non_na <- na.omit(row)
+  if(length(valori_non_na) > 0) {
+    return(valori_non_na[1])
+  } else {
+    return(NA)
+  }
+})
+
+# Feeding gluid assignment based on s and w + Multiple forest structural elements are needed to promote beetle biomass, diversity and abundance Nolan J. Rappa
+coleo_data_traits <- coleo_data_traits %>%
+  mutate(Feeding_guild = ifelse(species == "Acrotrichis rosskotheni", "f", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cartodere bifasciata", "f", Feeding_guild),
+         Feeding_guild = ifelse(species == "Ceutorhynchus atomus", "h", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cortinicara gibbosa", "f", Feeding_guild),
+         Feeding_guild = ifelse(species == "Lasiorhynchites cavifrons", "h", Feeding_guild),
+         Feeding_guild = ifelse(species == "Oenopia conglobata", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Philorhizus quadrisignatus", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Phloeostiba lapponica", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cryptophagus dentatus", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cryptophagus pallidus", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cryptophagus cylindrellus", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Ampedus scrofa", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Anaspis thoracica", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cis jaquemarti", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cis vestitus", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Cyclorhipidion bodoanum", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Grammoptera abdominalis", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Ips amitinus", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Ips cembrae", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Ostoma ferruginea", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Stenagostus rufus", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Stictoleptura rubrah", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Xylosandrus germanush", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Placusa incompleta", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Dryocoetes hectographus", "h", Feeding_guild),
+         Feeding_guild = ifelse(species == "Epuraea silesiaca", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Melanophthalma rispini", "f", Feeding_guild),
+         Feeding_guild = ifelse(species == "Rhagonycha nigriceps", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Stictoleptura rubra", "s", Feeding_guild),
+         Feeding_guild = ifelse(species == "Xylosandrus germanus", "h", Feeding_guild))
+
+coleo_data_traits <- coleo_data_traits %>%
+  mutate(Feeding_guild = ifelse(Feeding_guild %in% c("f", "d", "s"), "m", Feeding_guild))
+
+
+# Verifying NAs and sp without data 
+#nodata <- coleo_data_traits[is.na(coleo_data_traits$bodysize), ]
+#nodata_sp <- data.frame(species = unique(nodata$species))
+#summary(nodata)
+#nodata_sp
+# 165 NAs 
+# 12 sp without data
+
+# Using "h data" evaluated manually 
+# Column of interest
+col_data2 <- c("bodysize", "body_length")
+
+# Creation of a new column (bodyzise2) with unified columns 
+coleo_data_traits$bodysize2 <- apply(coleo_data_traits[col_data2], 1, function(row) {
+  valori_non_na <- na.omit(row)
+  if(length(valori_non_na) > 0) {
+    return(valori_non_na[1])
+  } else {
+    return(NA)
+  }
+})
+
+# Body lenght assignment based on the books of Freude et al. "Die Käfer Mitteleuropas" + A new species of Philorhizus Hope, 1838 from Greece (Coleoptera, Carabidae, Lebiini) David W. Wrase, Thorsten Assmann + https://www.ukbeetles.co.uk/lasiorhynchites-cavifrons 
+coleo_data_traits <- coleo_data_traits %>%
+  mutate(bodysize2 = ifelse(species == "Acrotrichis rosskotheni", 0.8, bodysize2),
+         bodysize2 = ifelse(species == "Cartodere bifasciata", 2.2, bodysize2),
+         bodysize2 = ifelse(species == "Ceutorhynchus atomus", 1.75, bodysize2),
+         bodysize2 = ifelse(species == "Cryptophagus dentatus", 2.4, bodysize2),
+         bodysize2 = ifelse(species == "Cryptophagus pallidus", 2.35, bodysize2),
+         bodysize2 = ifelse(species == "Epuraea silesiaca", 2.75, bodysize2),
+         bodysize2 = ifelse(species == "Lasiorhynchites cavifrons", 6.9, bodysize2),
+         bodysize2 = ifelse(species == "Melanophthalma rispini", 1.65, bodysize2),
+         bodysize2 = ifelse(species == "Oenopia conglobata", 4.25, bodysize2),
+         bodysize2 = ifelse(species == "Philorhizus quadrisignatus", 4.2, bodysize2),
+         bodysize2 = ifelse(species == "Rhagonycha nigriceps", 6.5, bodysize2))
+
+# Function to calculate bodymass
+bodymass <- function(bodysize2) {
+  return(0.038 * bodysize2^2.46)
+}
+
+
+# Add bodymass to data
+coleo_data_traits <- coleo_data_traits %>% mutate(bodymass = bodymass(bodysize2))
+#bodymass <- coleo_data_traits[c(1,18)] # matrix with species and bodymass
+#bodymass <- unique(bodymass)
+#bodymass <- na.omit(bodymass)
+
+str(coleo_data_traits)
+View(coleo_data_traits)
+
+
+# Verifying NAs and sp without data 
+#nodata2 <- coleo_data_traits[is.na(coleo_data_traits$bodysize2), ]
+#nodata_sp2 <- data.frame(species = unique(nodata2$species))
+#summary(nodata2)
+#nodata_sp2
+# 34 NAs 
+# 11 sp without data
+
+#write.csv(nodata_sp2, file = "outputs/missing_sp.csv", row.names = FALSE)
+
+# Verifying NAs and sp without data 
+#nodata_fg <- coleo_data_traits[is.na(coleo_data_traits$Feeding_guild), ]
+#nodata_fg_sp <- data.frame(species = unique(nodata_fg$species))
+#summary(nodata_fg)
+#nodata_fg_sp
+# 161 NAs
+# 6
+
+#write.csv(nodata_fg_sp, file = "outputs/missing_fg.csv", row.names = FALSE)
+
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+
+# coleo ground ----
+
+g1 <- read.csv("data/1.csv", sep = ";")
+g2 <- read.csv("data/2.csv", sep = ";")
+g3 <- read.csv("data/3.csv", sep = ";")
+g4 <- read.csv("data/4.csv", sep = ";")
+g5 <- read.csv("data/5.csv", sep = ";")
+g6 <- read.csv("data/6.csv", sep = ";")
+g7 <- read.csv("data/7.csv", sep = ";")
+g8 <- read.csv("data/8.csv", sep = ";")
+
+
+val <- c("Douglasie" = 1, 
+         "Buche-Douglasie" = 2, 
+         "Buche" = 3, 
+         "Buche-Fichte" = 4, 
+         "Fichte" = 5)
+
+# Add Variante column
+g5 <- g5 %>%
+  mutate(Variante = val[Bestandstyp])
+g6 <- g6 %>%
+  mutate(Variante = val[Bestandstyp])
+g7 <- g7 %>%
+  mutate(Variante = val[Bestandstyp])
+g8 <- g8 %>%
+  mutate(Variante = str_extract(Fallensignatur, "8\\.([1-5])")) %>%
+  mutate(Variante = str_extract(Variante, "[1-5]"))
+
+g3$Zeitraum <- gsub("Z", "", g3$Zeitraum)
+g4$Zeitraum <- gsub("Z", "", g4$Zeitraum)
+g5$Zeitraum <- gsub("Z", "", g5$Zeitraum)
+g6$Zeitraum <- gsub("Z", "", g6$Zeitraum)
+g7$Zeitraum <- gsub("Z", "", g7$Zeitraum)
+
+
+g4 <- g4 %>%
+  mutate(Falle = str_extract(Fallensignatur, "Tr\\.\\s*([1-8])") %>% str_replace("Tr\\.\\s*", ""))
+g5 <- g5 %>%
+  mutate(Falle = str_extract(Fallensignatur, "Tr\\.\\s*([1-8])") %>% str_replace("Tr\\.\\s*", ""))
+g6 <- g6 %>%
+  mutate(Falle = str_extract(Fallensignatur, "Tr\\.\\s*([1-8])") %>% str_replace("Tr\\.\\s*", ""))
+g7 <- g7 %>%
+  mutate(Falle = str_extract(Fallensignatur, "Tr\\.\\s*([1-8])") %>% str_replace("Tr\\.\\s*", ""))
+g8 <- g8 %>%
+  mutate(Falle = str_extract(Fallensignatur, "Tr\\.\\s*([1-8])") %>% str_replace("Tr\\.\\s*", ""))
+
+g8$Fläche <- paste0(g8$Gebiet, ".", g8$Variante)
+
+g1$Fläche <- gsub(",", ".", g1$Fläche)
+
+colnames(g1)[colnames(g1) == "Bemerkung"] <- "Bemerkungen"
+colnames(g5)[colnames(g5) == "Bemerkung"] <- "Bemerkungen"
+
+g1$Fläche <- as.numeric(g1$Fläche)
+g3$Zeitraum <- as.integer(g3$Zeitraum)
+g4$Falle <- as.integer(g4$Falle)
+g4$Zeitraum <- as.integer(g4$Zeitraum)
+g5$Falle <- as.integer(g5$Falle)
+g5$Zeitraum <- as.integer(g5$Zeitraum)
+g5$Variante <- as.integer(g5$Variante)
+g6$Falle <- as.integer(g6$Falle)
+g6$Zeitraum <- as.integer(g6$Zeitraum)
+g6$Variante <- as.integer(g6$Variante)
+g7$Falle <- as.integer(g7$Falle)
+g7$Zeitraum <- as.integer(g7$Zeitraum)
+g7$Variante <- as.integer(g7$Variante)
+g8$Falle <- as.integer(g8$Falle)
+g8$Variante <- as.integer(g8$Variante)
+g8$Fläche <- as.numeric(g8$Fläche)
+g8 <- g8 %>%
+  select(-starts_with("X"))
+
+coleo_ground <- bind_rows(g1, g2, g3, g4, g5, g6, g7, g8, .id = "Source")
+coleo_ground <- coleo_ground %>%
+  mutate(stratum = 1)
+
+coleo_us <- coleo_data_traits[,c(-4,-12,-13,-14,-15,-17,-18,-19)]
+coleo_us <- coleo_us %>%
+  mutate(stratum = 2)
+
+colnames(coleo_ground)[colnames(coleo_ground) == "Fallensignatur"] <- "trap_ID"
+colnames(coleo_ground)[colnames(coleo_ground) == "Zeitraum"] <- "period"
+colnames(coleo_ground)[colnames(coleo_ground) == "Gebiet"] <- "site"
+colnames(coleo_ground)[colnames(coleo_ground) == "Variante"] <- "stand"
+colnames(coleo_ground)[colnames(coleo_ground) == "Falle"] <- "trap"
+colnames(coleo_ground)[colnames(coleo_ground) == "Fläche"] <- "plot"
+colnames(coleo_ground)[colnames(coleo_ground) == "Familie"] <- "family"
+colnames(coleo_ground)[colnames(coleo_ground) == "Art"] <- "species"
+colnames(coleo_ground)[colnames(coleo_ground) == "Anzahl"] <- "abundance"
+
+# coleo ground north and south 
+coleo_ground_north <- read.table("data/Carabids_north_trapmatrix.txt", header = TRUE, sep = "\t")  
+coleo_ground_south <- read.csv("data/Carabidae_south.csv", sep = ";")
+
+coleo_ground_north <- coleo_ground_north %>%
+  pivot_longer(cols = -c(Periode, Plot...Art), names_to = "species", values_to = "abundance")
+coleo_ground_north <- coleo_ground_north %>%
+  filter(abundance != 0)
+coleo_ground_north <- coleo_ground_north %>%
+  mutate(site = as.integer(substr(Plot...Art, 1, 1)),
+         stand= as.integer(substr(Plot...Art, 2, 2)),
+         trap = as.integer(substr(Plot...Art, 3, 3)))
+
+coleo_ground_north$species <- gsub("\\.", " ", coleo_ground_north$species)
+colnames(coleo_ground_north)[colnames(coleo_ground_north) == "Periode"] <- "period"
+colnames(coleo_ground_north)[colnames(coleo_ground_north) == "Plot...Art"] <- "trap_ID"
+coleo_ground_north$trap_ID <- as.character(coleo_ground_north$trap_ID)
+coleo_ground_north <- coleo_ground_north %>%
+  mutate(stratum = 1)
+coleo_ground_north$plot <- paste(coleo_ground_north$site, coleo_ground_north$stand, sep = ".")
+coleo_ground_north$plot <- as.numeric(coleo_ground_north$plot)
+
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Art"] <- "species"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Fang.periode"] <- "period"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Gebiet"] <- "site"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Stand"] <- "stand"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Trap"] <- "trap"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Plot"] <- "plot"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Bemerkung"] <- "Bemerkungen"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Habitat"] <- "Bestandstyp"
+colnames(coleo_ground_south)[colnames(coleo_ground_south) == "Abundanz"] <- "abundance"
+
+coleo_ground_south <- coleo_ground_south %>%
+  mutate(stratum = 1)
+names(coleo_ground_south)[names(coleo_ground_south) == "plot"] <- "site"
+coleo_ground_south$plot <- paste(coleo_ground_south$site, coleo_ground_south$stand, sep = ".")
+coleo_ground_south$plot <- as.numeric(coleo_ground_south$plot)
+
+# add trapID to ground datasets
+coleo_ground$trapID <- paste0(coleo_ground$site, "_", coleo_ground$stand, "_", coleo_ground$trap)
+coleo_ground_north$trapID <- paste0(coleo_ground_north$site, "_", coleo_ground_north$stand, "_", coleo_ground_north$trap)
+coleo_ground_south$trapID <- paste0(coleo_ground_south$site, "_", coleo_ground_south$stand, "_", coleo_ground_south$trap)
+
+coleo_ground <- bind_rows(coleo_ground, coleo_ground_south, coleo_ground_north, .id = "Source")
+View(coleo_ground)
+# coleo cano ----
+coleo_cano <- read.csv("data/canopycoleo.csv", sep = ";")
+colnames(coleo_cano)[colnames(coleo_cano) == "Trap_ID"] <- "trap_ID"
+colnames(coleo_cano)[colnames(coleo_cano) == "Sampling_period_ID"] <- "period"
+colnames(coleo_cano)[colnames(coleo_cano) == "Site_ID"] <- "site"
+colnames(coleo_cano)[colnames(coleo_cano) == "Stand_type"] <- "stand"
+colnames(coleo_cano)[colnames(coleo_cano) == "Trap_replicate"] <- "trap"
+colnames(coleo_cano)[colnames(coleo_cano) == "Plot_ID"] <- "plot"
+colnames(coleo_cano)[colnames(coleo_cano) == "Family"] <- "family"
+colnames(coleo_cano)[colnames(coleo_cano) == "Species"] <- "species"
+colnames(coleo_cano)[colnames(coleo_cano) == "Abundance"] <- "abundance"
+colnames(coleo_cano)[colnames(coleo_cano) == "Trophic_guild"] <- "Feeding_guild"
+colnames(coleo_cano)[colnames(coleo_cano) == "Mean_biomass"] <- "bodymass"
+
+coleo_cano <- coleo_cano %>%
+  mutate(stand = recode(stand,
+                        "Douglas fir" = 1,
+                        "Beech-Douglas" = 2,
+                        "European beech" = 3,
+                        "Beech-spruce" = 4,
+                        "Norway spruce" = 5) %>%
+           as.integer())
+
+coleo_cano <- coleo_cano %>%
+  mutate(Feeding_guild = recode(Feeding_guild,
+                                "Carnivorous" = "c",
+                                "Omnivorous" = "o",
+                                "Myceto-detrivorous" = "m",
+                                "Herbivorous" = "h"))
+
+coleo_cano <- coleo_cano %>%
+  mutate(stratum = 3)
+
+write.csv(coleo_us, file = "outputs/coleo_us.csv", row.names = FALSE)
+write.csv(coleo_ground, file = "outputs/coleo_ground.csv", row.names = FALSE)
+write.csv(coleo_cano, file = "outputs/coleo_cano.csv", row.names = FALSE)
+
+coleo <- bind_rows(coleo_ground, coleo_us, coleo_cano, .id = "Source")
+
+str(coleo)
+summary(coleo)
+View(coleo)
+
+# new things for meeting ----
+
+# n traps cano
+unique(coleo_cano$trap_ID) # 117 trap
+
+# NMDS cano plot dist horn k=3 
+coleo_cano_abu <- coleo_cano %>%
+  group_by(stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+coleo_cano_cm <- coleo_cano_abu %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(plot) %>%
+  select(stand,site,plot, sort(names(.)))
+
+coleo_cano_cm_NMDS <- coleo_cano_cm[,4:329]
+nmd_trap <- metaMDS(coleo_cano_cm_NMDS, k=3, dist="horn")
+
+png("nmds_coleo_cano.png", width=2400, height=2200, res = 300)
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+plot(nmd_trap,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap,groups=coleo_cano_cm$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  #PSenv<-spiders_cm_env_plot[,c("litter_depth_avg","Be_APA","Do_APA","Sp_APA")]
+  #envir<-envfit(nmd_trap,PSenv) 
+  #envir
+  #plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+dev.off()
+
+# n trapc us
+unique(coleo_data_traits$trap_ID)
+# aggregating abundance per species and trap
+coleo_us_abu <- coleo_data_traits %>%
+  group_by(stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+
+coleo_us_cm <- coleo_us_abu %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(plot) %>%
+  select(stand,site,plot, sort(names(.)))
+
+# NMDS us plot dist horn k=3
+str(coleo_us_cm)
+coleo_us_cm_NMDS <- coleo_us_cm[,4:457]
+nmd_trap <- metaMDS(coleo_us_cm_NMDS, k=3, dist="bray")
+
+png("nmds_coleo_us.png", width=2400, height=2200, res = 300)
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+plot(nmd_trap,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap,groups=coleo_us_cm$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  #PSenv<-spiders_cm_env_plot[,c("litter_depth_avg","Be_APA","Do_APA","Sp_APA")]
+  #envir<-envfit(nmd_trap,PSenv) 
+  #envir
+  #plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+dev.off()
+
+coleo_cm$SR <- specnumber(coleo_cm[,5:458]) #species per trap 
+coleo_cm$abund <- rowSums(coleo_cm[,5:458]) #adult individuals per trap
+
+# n trap ground
+unique(coleo_ground_all$trapID)
+coleo_ground_all$abundance <- abs(coleo_ground_all$abundance)
+
+# aggregating abundance per species and trap
+coleo_ground_all_abu <- coleo_ground_all %>%
+  group_by(stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+View(coleo_ground_all_cm)
+coleo_ground_all_cm <- coleo_ground_all_abu %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(plot) %>%
+  select(stand,site,plot, sort(names(.)))
+
+# NMDS us plot dist horn k=3
+coleo_gr_cm_NMDS <- coleo_ground_all_cm[,4:692]
+nmd_trap <- metaMDS(coleo_gr_cm_NMDS, k=3, dist="horn")
+
+png("nmds_coleo_gr.png", width=2400, height=2200, res = 300)
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+plot(nmd_trap,type="p",display="species"), xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2)
+{
+  plot(nmd_trap,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd_trap,groups=coleo_ground_all_cm$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  #PSenv<-spiders_cm_env_plot[,c("litter_depth_avg","Be_APA","Do_APA","Sp_APA")]
+  #envir<-envfit(nmd_trap,PSenv) 
+  #envir
+  #plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+dev.off()
+
+# sr
+View(coleo_cano)
+coleo_cano_abu_trap <- coleo_cano %>%
+  group_by(trap_ID, stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+coleo_cano_cm_trap <- coleo_cano_abu_trap %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(trap_ID) %>%
+  select(stand,site,plot, sort(names(.)))
+coleo_cano_cm_trap <- coleo_cano_cm_trap %>%
+  select(trap_ID, everything())
+
+coleo_cano_cm_trap$SR <- specnumber(coleo_cano_cm_trap[,5:330]) #species per trap 
+coleo_cano_cm_trap$abund <- rowSums(coleo_cano_cm_trap[,5:330]) #adult individuals per trap
+
+coleo_cano_cm_trap$stand <- as.character(coleo_cano_cm_trap$stand)
+coleo_cano_cm_trap[coleo_cano_cm_trap[, "stand"] == 1, "stand"] <- "D"
+coleo_cano_cm_trap[coleo_cano_cm_trap[, "stand"] == 2, "stand"] <- "D-B"
+coleo_cano_cm_trap[coleo_cano_cm_trap[, "stand"] == 3, "stand"] <- "B"
+coleo_cano_cm_trap[coleo_cano_cm_trap[, "stand"] == 4, "stand"] <- "S-B"
+coleo_cano_cm_trap[coleo_cano_cm_trap[, "stand"] == 5, "stand"] <- "S"
+coleo_cano_cm_trap$stand <- factor(coleo_cano_cm_trap$stand, levels = c("D", "D-B", "B", "S-B", "S"))
+
+SR_cano <- ggplot(coleo_cano_cm_trap, aes(x = stand, y = SR, fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Canopy", x = "Stand", y = "Species richness") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+abu_cano <- ggplot(coleo_cano_cm_trap, aes(x = stand, y = log(abund), fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Canopy", x = "Stand", y = "log(Abundance)") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+
+coleo_us_abu_trap <- coleo_data_traits %>%
+  group_by(trap_ID, stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+coleo_us_cm_trap <- coleo_us_abu_trap %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(trap_ID) %>%
+  select(stand,site,plot, sort(names(.)))
+coleo_us_cm_trap <- coleo_us_cm_trap %>%
+  select(trap_ID, everything())
+
+coleo_us_cm_trap$SR <- specnumber(coleo_us_cm_trap[,5:458]) #species per trap 
+coleo_us_cm_trap$abund <- rowSums(coleo_us_cm_trap[,5:458]) #adult individuals per trap
+
+coleo_us_cm_trap$stand <- as.character(coleo_us_cm_trap$stand)
+coleo_us_cm_trap[coleo_us_cm_trap[, "stand"] == 1, "stand"] <- "D"
+coleo_us_cm_trap[coleo_us_cm_trap[, "stand"] == 2, "stand"] <- "D-B"
+coleo_us_cm_trap[coleo_us_cm_trap[, "stand"] == 3, "stand"] <- "B"
+coleo_us_cm_trap[coleo_us_cm_trap[, "stand"] == 4, "stand"] <- "S-B"
+coleo_us_cm_trap[coleo_us_cm_trap[, "stand"] == 5, "stand"] <- "S"
+coleo_us_cm_trap$stand <- factor(coleo_us_cm_trap$stand, levels = c("D", "D-B", "B", "S-B", "S"))
+
+SR_us <- ggplot(coleo_us_cm_trap, aes(x = stand, y = SR, fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Understorey", x = "Stand", y = "Species richness") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+abu_us <- ggplot(coleo_us_cm_trap, aes(x = stand, y = log(abund), fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Understorey", x = "Stand", y = "log(Abundance)") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+coleo_gr_abu_trap <- coleo_ground_all %>%
+  group_by(trapID, stand, site, species, plot) %>%
+  summarise(abundance= sum(abundance))
+coleo_gr_cm_trap <- coleo_gr_abu_trap %>%
+  pivot_wider(names_from = species, values_from = abundance, values_fill = 0) %>%
+  arrange(trapID) %>%
+  select(stand,site,plot, sort(names(.)))
+coleo_gr_cm_trap <- coleo_gr_cm_trap %>%
+  select(trapID, everything())
+
+coleo_gr_cm_trap$SR <- specnumber(coleo_gr_cm_trap[,5:693]) #species per trap 
+coleo_gr_cm_trap$abund <- rowSums(coleo_gr_cm_trap[,5:693]) #adult individuals per trap
+
+coleo_gr_cm_trap$stand <- as.character(coleo_gr_cm_trap$stand)
+coleo_gr_cm_trap[coleo_gr_cm_trap[, "stand"] == 1, "stand"] <- "D"
+coleo_gr_cm_trap[coleo_gr_cm_trap[, "stand"] == 2, "stand"] <- "D-B"
+coleo_gr_cm_trap[coleo_gr_cm_trap[, "stand"] == 3, "stand"] <- "B"
+coleo_gr_cm_trap[coleo_gr_cm_trap[, "stand"] == 4, "stand"] <- "S-B"
+coleo_gr_cm_trap[coleo_gr_cm_trap[, "stand"] == 5, "stand"] <- "S"
+coleo_gr_cm_trap$stand <- factor(coleo_gr_cm_trap$stand, levels = c("D", "D-B", "B", "S-B", "S"))
+
+SR_gr <- ggplot(coleo_gr_cm_trap, aes(x = stand, y = SR, fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Ground", x = "Stand", y = "Species richness") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+abu_gr <- ggplot(coleo_gr_cm_trap, aes(x = stand, y = abund, fill = stand)) +
+  geom_boxplot() +
+  labs(title = "Understorey", x = "Stand", y = "Abundance") +
+  scale_fill_brewer(palette = "Set3") +
+  stat_summary(fun = "mean", geom = "point", shape = 20, size = 3, color = "red") +
+  theme_bw()+
+  theme(text = element_text(size = 18), 
+        axis.title = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5, size = 30),
+        axis.text = element_text(size = 20),
+        legend.position = "none")
+
+sr_abu <- ggarrange(SR_cano, SR_us, SR_gr, abu_cano, abu_us, abu_gr,
+                         ncol = 3, nrow = 2,
+                         common.legend = T, legend = "bottom")
+ggsave("sr_abu.png", plot = sr_abu, width = 25, height = 10, dpi = 400)
+
+
+# Feeding guilds assignment ----
+# Checking mismatches between others and cano guilds
+coleo_no_NA <- coleo[!is.na(coleo$Feeding_guild), ]
+
+species_with_multiple_guilds <- coleo_no_NA %>%
+  group_by(species) %>%
+  summarise(unique_guilds = n_distinct(Feeding_guild)) %>%
+  filter(unique_guilds > 1)
+
+df_mismatch <- coleo_no_NA[coleo_no_NA$species %in% species_with_multiple_guilds$species, ]
+
+# Changing 3 species feeding guild to match it with Benjamin coleo canopy
+coleo$Feeding_guild[coleo$species == "Anaspis thoracica"] <- "o"
+coleo$Feeding_guild[coleo$species == "Anthribus nebulosus"] <- "m"
+coleo$Feeding_guild[coleo$species == "Eusphalerum semicoleoptratum"] <- "c"
+
+# Sostituzione dei NA con il valore corrispondente della stessa specie
+coleo <- coleo %>%
+  group_by(species) %>%                              # Raggruppa per specie
+  mutate(Feeding_guild = ifelse(is.na(Feeding_guild),  # Se Feeding_guild è NA
+                                first(Feeding_guild[!is.na(Feeding_guild)]), # Sostituiscilo con il primo valore non-NA
+                                Feeding_guild)) %>%  # Altrimenti, mantieni il valore esistente
+  ungroup()  # Rimuovi il raggruppamento
+
+# Crea una lista delle specie che hanno solo NA in Feeding_guild
+species_with_na <- coleo %>%
+  group_by(species) %>%                       # Raggruppa per specie
+  summarise(all_na = all(is.na(Feeding_guild))) %>%  # Verifica se tutte le righe hanno NA in Feeding_guild
+  filter(all_na) %>%                          # Filtra solo le specie con tutti NA
+  pull(species)                               # Estrai i nomi delle specie come vettore
+
+species_with_na <- as.data.frame(species_with_na)
+names(species_with_na)[names(species_with_na) == "species_with_na"] <- "species"
+
+coleo_ground_na <- merge(species_with_na, fg_s, by = "species", all.x = TRUE)
+
+coleo_ground_na <- coleo_ground_na %>%
+  mutate(Feeding_guild = ifelse(species == "Abax spec.", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Abax spec ", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Aleochara spec.", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Atheta spec.", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Catops spec.", "m", Feeding_guild),
+         Feeding_guild = ifelse(species == "Gabrius spec.", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Gyrophaena spec.", "m", Feeding_guild),
+         Feeding_guild = ifelse(species == "Liogluta spec.", "c", Feeding_guild),
+         Feeding_guild = ifelse(species == "Mycetoporus spec.", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Omalium spec.", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Oxypoda spec.", "o", Feeding_guild),
+         Feeding_guild = ifelse(species == "Stenus spec.", "c", Feeding_guild))
+
+
+nodata <- coleo_ground_na[is.na(coleo_ground_na$Feeding_guild), ]
+write.csv(nodata, file = "outputs/missing_sp_ground_fg.csv", row.names = FALSE)
+
+merged <- coleo %>%
+  left_join(coleo_ground_na %>% select(species, Feeding_guild), by = "species", suffix = c("", "_na"))
+
+# Step 2: Aggiorna "Feeding_guild" in "coleo" con i valori di "Feeding_guild" provenienti da "coleo_ground_na"
+# dove sono presenti valori NA in "coleo"
+coleo <- merged %>%
+  mutate(Feeding_guild = ifelse(is.na(Feeding_guild), Feeding_guild_na, Feeding_guild)) %>%
+  select(-Feeding_guild_na)  # Rimuove la colonna temporanea
+
+# Conta il numero di specie che hanno ancora valori NA nella colonna "Feeding_guild"
+species_with_na <- coleo %>%
+  filter(is.na(Feeding_guild)) %>%
+  distinct(species) %>%
+  nrow()
+
+# Visualizza il numero di specie con NA
+print(paste("Numero di specie con NA in 'Feeding_guild':", species_with_na))
+
+coleo <- coleo %>%
+  mutate(Feeding_guild = ifelse(Feeding_guild %in% c("f", "d", "s"), "m", Feeding_guild))
+
+# Bodymass ----
+# Checking mismatches between others and cano bodymass
+# Step 1: Rimuovi le righe con valori NA in bodymass
+bm <- coleo[!is.na(coleo$bodymass), ]
+
+# Step 2: Identifica le specie con più di un valore unico di bodymass
+species_with_multiple_bodymass <- bm %>%
+  group_by(species) %>%
+  summarise(unique_bodymass = n_distinct(bodymass)) %>%
+  filter(unique_bodymass > 1)
+
+# Step 3: Filtra il dataframe originale per mantenere solo le specie con più valori di bodymass
+bmh <- bm[bm$species %in% species_with_multiple_bodymass$species, ]
+
+# Step 4: Filtra ulteriormente per assicurarti che siano inclusi solo i valori di bodymass diversi per specie
+bmh_filtered <- bmh %>%
+  group_by(species) %>%
+  filter(n_distinct(bodymass) > 1)
+
+
+# Changing species bodymass to match it with Benjamin coleo canopy
+coleo$bodymass[coleo$species == "Acrotrichis rosskotheni"] <- 0.0428459
+
+# Sostituzione dei NA con il valore corrispondente della stessa specie
+coleo <- coleo %>%
+  group_by(species) %>%                              # Raggruppa per specie
+  mutate(bodymass = ifelse(is.na(bodymass),  # Se Feeding_guild è NA
+                           first(bodymass[!is.na(bodymass)]), # Sostituiscilo con il primo valore non-NA
+                           bodymass)) %>%  # Altrimenti, mantieni il valore esistente
+  ungroup()  # Rimuovi il raggruppamento
+
+# Crea una lista delle specie che hanno solo NA in bodymass
+species_with_na <- coleo %>%
+  group_by(species) %>%                       # Raggruppa per specie
+  summarise(all_na = all(is.na(bodymass))) %>%  # Verifica se tutte le righe hanno NA in Feeding_guild
+  filter(all_na) %>%                          # Filtra solo le specie con tutti NA
+  pull(species)                               # Estrai i nomi delle specie come vettore
+
+species_with_na <- as.data.frame(species_with_na)
+names(species_with_na)[names(species_with_na) == "species_with_na"] <- "species"
+
+coleo_ground_bmna <- merge(species_with_na, body_size_gm, by = "species", all.x = TRUE)
+coleo_ground_bmna <- merge(coleo_ground_bmna, body_size_s, by = "species", all.x = TRUE) # best one with all bodysize
+coleo_ground_bmna <- merge(coleo_ground_bmna, mean_body_size_h, by = "species", all.x = TRUE)
+coleo_data_traits <- merge(coleo_ground_bmna, body_size_h, by = "species", all.x = TRUE)
+
+# Column of interest
+col_data <- c("Body_Size", "Mean_BodySize", "mean_body_length_literature")
+
+# Creation of a new column (bodyzise) with unified columns 
+coleo_ground_bmna$bodysize <- apply(coleo_ground_bmna[col_data], 1, function(row) {
+  valori_non_na <- na.omit(row)
+  if(length(valori_non_na) > 0) {
+    return(valori_non_na[1])
+  } else {
+    return(NA)
+  }
+})
+
+coleo_ground_bmna <- coleo_ground_bmna[c(-2,-3,-4)]
+
+# Verifying NAs and sp without data 
+nodata3 <- coleo_ground_bmna[is.na(coleo_ground_bmna$bodysize), ]
+nodata3_sp <- data.frame(species = unique(nodata3$species))
+write.csv(nodata3, file = "outputs/missing_sp_ground_bm.csv", row.names = FALSE)
+
+
+# Function to calculate bodymass
+bodymass <- function(bodysize) {
+  return(0.038 * bodysize^2.46)
+}
+# Add bodymass to data
+coleo_ground_bmna <- coleo_ground_bmna %>%
+  mutate(bodymass = bodymass(bodysize))
+
+merged <- coleo %>%
+  left_join(coleo_ground_bmna %>% select(species, bodymass), by = "species", suffix = c("", "_na"))
+
+# Step 2: Aggiorna "Feeding_guild" in "coleo" con i valori di "Feeding_guild" provenienti da "coleo_ground_na"
+# dove sono presenti valori NA in "coleo"
+coleo <- merged %>%
+  mutate(bodymass = ifelse(is.na(bodymass), bodymass_na, bodymass)) %>%
+  select(-bodymass_na)  # Rimuove la colonna temporanea
+
+# Conta il numero di specie che hanno ancora valori NA nella colonna "Feeding_guild"
+species_with_na <- coleo %>%
+  filter(is.na(bodymass)) %>%
+  distinct(species) %>%
+  nrow()
+
+# Visualizza il numero di specie con NA
+print(paste("Numero di specie con NA in 'Feeding_guild':", species_with_na))
+
+
+write.csv(coleo, file = "outputs/allbeetles.csv", row.names = FALSE)
+
+# coleo all ----
+# Transform negative numbers in positive
+coleo$abundance <- abs(coleo$abundance)
+
+# create trapID col
+coleo$trapID <- paste(coleo$site, coleo$stand, coleo$trap, coleo$stratum, sep = ".")
+
+# create mix-mono col
+coleo <- coleo %>%
+  mutate(stand_type = case_when(
+    stand == 1 ~ "mono",
+    stand == 2 ~ "mix",
+    stand == 3 ~ "mono",
+    stand == 4 ~ "mix",
+    stand == 5 ~ "mono"
+  ))
+
+# Transform var into factor
+coleo <- coleo %>%
+  mutate(
+    site = as.factor(site),
+    plot = as.factor(plot),
+    trapID = as.factor(trapID),
+    stand_type = as.factor(stand_type),
+    stand = as.factor(stand),
+    stratum = as.factor(stratum)
+  )
+str(coleo)
+
+# Env data to add ----
+env <- read.csv2("data/Coleo_trap21_input_nolosses_DET.csv", dec = ("."), header = TRUE, stringsAsFactors = FALSE)
+env <- env[, c(2,3,5,6,7,8,9,42,43,44,45,47,48,49,50,51,52,53,54,55)]
+
+View(coleo)
+View(env)
+coleo_env <- merge(coleo, env, by = "plot", all.x = TRUE)
+
+#### diveristy ####
+
+str(coleo_data_traits)
+
+#### trap level ####
+# subset coleo data traits 
+coleo_data_traits_trap <- coleo_data_traits[,c(-2,-3,-4,-9,-11,-12,-13,-14,-15,-17,-18,-19)]
+# "feeding" and "species" col merged 
+coleo_data_traits_merged <- coleo_data_traits_trap %>%
+  unite("feeding_species", c("Feeding_guild", "species"), sep = "_")
+
+# Pivota il dataframe trap level -> community matrix
+coleo_data_traits_merged <- pivot_wider(
+  data = coleo_data_traits_merged[,c(-4,-7)],
+  names_from = feeding_species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+# NAs in 0
+coleo_data_traits_merged[is.na(coleo_data_traits_merged)] <- 0
+
+# import level data
+level <- read.csv2("level.csv", dec = (";"), header = TRUE, stringsAsFactors = FALSE)
+
+# oreder dataframe per stand 
+indici_ordine <- order(coleo_data_traits_merged$stand, coleo_data_traits_merged$trap_ID)
+coleo_data_traits_merged <- coleo_data_traits_merged[indici_ordine, ]
+
+coleo <- coleo_data_traits_merged[4:457]
+coleo
+
+# sr trap
+SR = specnumber(coleo)
+(raremax <- min(rowSums(coleo)))
+(Srare <- rarefy(coleo, raremax))
+plot(SR, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+rarecurve(coleo, step = 20, sample = raremax, col = "blue", cex = 0.6)
+
+####### addipart and multipart ###############
+
+
+leveld <- level[which(level$stand=='1'), ]
+levelbd <- level[which(level$stand=='2'), ]
+levelb <- level[which(level$stand=='3'), ]
+levelbs <- level[which(level$stand=='4'), ]
+levels <- level[which(level$stand=='5'), ]
+
+#Douglas
+specd <- coleo[1:24, ]
+#Beech-Douglas
+specbd <- coleo[25:48, ]
+#Beech
+specb <- coleo[49:72, ]
+#Beech-Spruce
+specbs <- coleo[73:96, ]
+#Spruce
+specs <- coleo[97:120, ]
+
+## only trap level
+adipart(specd, index="richness", nsimul=999)
+adipart(specbd, index="richness", nsimul=999)
+adipart(specb, index="richness", nsimul=999)
+adipart(specbs, index="richness", nsimul=999)
+adipart(specs, index="richness", nsimul=999)
+
+## trap & plot level
+#### adipart(spec, level, index="richness", nsimul=999) ####
+Douglas_multipart <- multipart(specd, leveld, index="renyi", 
+                                scales=1, nsimul=999)
+BeechDouglas_multipart <- multipart(specbd, levelbd, index="renyi", 
+                               scales=1, nsimul=999)
+Beech_multipart <- multipart(specb, levelb, index="renyi", 
+                               scales=1, nsimul=999)
+BeechNorway_multipart <- multipart(specbs, levelbs, index="renyi", 
+                               scales=1, nsimul=999)
+Norway_multipart <- multipart(specs, levels, index="renyi", 
+                               scales=1, nsimul=999)
+
+?multipart
+
+########## back to species richness (vegan) ###############
+
+SRtrap <- specnumber(coleo_data_traits_merged[4:457])
+SWtrap <- diversity(coleo_data_traits_merged[4:457])
+Evetrap <- (diversity(coleo_data_traits_merged[4:457])/(log(SR)))
+
+write.table(cbind(SRtrap, SWtrap, Evetrap, Srare), file="outputs/coleo_data_traits_trap_div.csv", sep = ";", dec = ".", row.names = FALSE)
+write.table(c(Srare), file="outputs/coleo_data_traits_trap_rarefaction.csv", sep = ";", dec = ".", row.names = FALSE)
+
+
+#SR = specnumber(spe[314:330])
+#SW = diversity(spe[314:330])
+#Eve=(diversity(spe[314:330])/(log(SR)))
+
+#write.table(c(SR, SW, Eve), file="Coleo_endangered_trap21_level_div_DET.csv", sep = ";", dec = ".", row.names = FALSE)
+
+SR_carni <- specnumber(select(coleo_data_traits_merged, starts_with("c")))
+SW_carni <- diversity(select(coleo_data_traits_merged, starts_with("c")))
+Eve_carni <- (SW_carni/(log(SR)))
+
+#SR_fungi = specnumber(spe[141:191])
+#SW_fungi= diversity(spe[141:191])
+#Eve_fungi=(diversity(spe[141:191])/(log(SR)))
+
+SR_herbi <-  specnumber(select(coleo_data_traits_merged, starts_with("h")))
+SW_herbi <-  diversity(select(coleo_data_traits_merged, starts_with("h")))
+Eve_herbi <- (SW_herbi)/(log(SR))
+
+SR_omni <- specnumber(select(coleo_data_traits_merged, starts_with("o")))
+SW_omni <- diversity(select(coleo_data_traits_merged, starts_with("o")))
+Eve_omni <- (SW_omni)/(log(SR))
+
+#SR_saprov = specnumber(spe[323:333])
+#SW_saprov= diversity(spe[323:333])
+#Eve_saprov=(diversity(spe[323:333])/(log(SR)))
+
+SR_myc_detr <- specnumber(select(coleo_data_traits_merged, starts_with("m")))
+SW_myc_detr <- diversity(select(coleo_data_traits_merged, starts_with("m")))
+Eve_myc_detr <- (SW_myc_detr)/(log(SR))
+
+o1 = as.data.frame(SR_carni)
+o2 = as.data.frame(SW_carni)
+o3 = as.data.frame(Eve_carni)
+#o4 = as.data.frame(SR_fungi)
+#o5 = as.data.frame(SW_fungi)
+#o6 = as.data.frame(Eve_fungi)
+o7 = as.data.frame(SR_herbi)
+o8 = as.data.frame(SW_herbi)
+o9 = as.data.frame(Eve_herbi)
+o10 = as.data.frame(SR_omni)
+o11 = as.data.frame(SW_omni)
+o12 = as.data.frame(Eve_omni)
+#o13 = as.data.frame(SR_paly)
+#o14 = as.data.frame(SW_paly)
+#o15 = as.data.frame(Eve_paly)
+#o16 = as.data.frame(SR_saprov)
+#o17 = as.data.frame(SW_saprov)
+#o18 = as.data.frame(Eve_saprov)
+o19 = as.data.frame(SR_myc_detr)
+o20 = as.data.frame(SW_myc_detr)
+o21 = as.data.frame(Eve_myc_detr)
+
+guilds = cbind(o1,o2,o3,o7,o8,o9,o10,o11,o12,o19,o20,o21)
+guilds
+
+write.table(guilds, file="outputs/coleo_guild_trap_div.csv", sep = ";", dec = ".", row.names = FALSE)
+
+####### plot level ###########
+coleo_data_traits_plot <- coleo_data_traits_merged[,c(-3)]
+
+SR <- specnumber(coleo_data_traits_plot[3:456])
+SW <-  diversity(coleo_data_traits_plot[3:456])
+Eve <- (SW)/(log(SR))
+
+(raremax <- min(rowSums(coleo_data_traits_plot[3:456])))
+(Srare <- rarefy(coleo_data_traits_plot[3:456], raremax))
+
+write.table(cbind(SR, SW, Eve, Srare), file="Coleo_traits_plot_div.csv", sep = ";", dec = ".", row.names = FALSE)
+
+########## FD (functional diversity)  #################
+View(coleo)
+
+
+
+rownames(matrix.red.plot) <- matrix.red.plot[,"site_plot_merge"]
+View(coleo_cm)
+# FD1 <- dbFD(traits, GB_matrix, m=5) #  (PCoA axes to keep as ‘traits’ for calculating FRic ))
+# Error in dbFD(traits, GB_matrix, m = 5) : 
+#  Species labels in 'x' and 'a' need to be identical and ordered alphabetically (or simply in the same order).
+
+# Ottieni l'indice di ordinamento delle specie
+indici_ordine <- order(coleo_data_traits[, 1])
+
+# Ordina la matrice in base alle specie
+coleo_data_traits <- coleo_data_traits[indici_ordine, ]
+
+traits2 <- coleo_data_traits[,c(-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12,-13,-14,-15,-17,-18,-19)]
+
+traits2 <- traits2[!duplicated(traits2$species), ]
+
+traits2 <- traits2[order(traits2$species), ]
+
+traits <- traits2[,c(-1)]
+
+GB <- coleo_data_traits[,c(-2,-3,-4,-6,-7,-8,-9,-11,-12,-13,-14,-15,-16,-17,-18,-19,-20)]
+
+# Pivota il dataframe trap level -> community matrix
+GB <- GB[!duplicated(GB$species), ]
+GB_matrix <- spread(GB, species, abundance)
+GB_matrix[is.na(GB_matrix)] <- 0
+GM_matrix <- as.matrix(GB_matrix)
+
+GB_matrix <- GB_matrix[-1]
+GB_matrix <- GB_matrix[, order(names(GB_matrix))]
+
+FD1<-dbFD(traits, GB_matrix, m=5) #  (PCoA axes to keep as ‘traits’ for calculating FRic ))
+
+if (!identical(colnames(GB_matrix[-1]), rownames(traits2))) {
+  stop("Le etichette delle specie nei dati non corrispondono.")
+}
+
+
+
+# ????
+BM=read.csv2("rel_BM_FD.csv", dec = ("."), header = TRUE, stringsAsFactors = FALSE)
+
+
+head(BM)
+
+BM_matrix = as.matrix(BM)
+
+?dbFD
+FD1<-dbFD(traits, coleo_data_pa[,c(-1:-3)], m=5) #  (PCoA axes to keep as ‘traits’ for calculating FRic ))
+
+FD1$FRic
+FD1$FDiv
+
+output_trap = as.data.frame(FD1)
+head(output_trap)
+write.table(output_trap, file="FD_trap.csv", sep = ";", row.names = FALSE)
+
+#???
+output_tarp = as.data.frame(FD2)
+write.table(output_tarp, file="FD_tarp.csv", sep = ";", row.names = FALSE)
+
+output_plot = as.data.frame(FD3)
+write.table(output_plot, file="FD_plot.csv", sep = ";", row.names = FALSE)
+
+output_abu_plot = as.data.frame(FD4)
+write.table(output_abu_plot, file="FD_DIV_trap.csv", sep = ";", row.names = FALSE)
+
+plotmatrix$nbsp<-FD$nbsp
+plotmatrix$FRic<-FD$FRic
+plotmatrix$FEve<-FD$FEve
+plotmatrix$FDiv<-FD$FDiv
+plotmatrix$FDis<-FD$FDis
+plotmatrix$RaoQ<-FD$RaoQ
+plotmatrix$CWM<-FD$CWM
+
+#### NMDS ####
+env <- read.csv2("data/NMDS_input_plot_DET.csv", dec = ("."), header = TRUE, stringsAsFactors = FALSE)
+names(env)[names(env) == "Plotcode"] <- "plot"
+
+
+#### plot ####
+names(coleo_data_traits_plot)[names(coleo_data_traits_plot) == "stand"] <- "Stand"
+
+# merging env col
+coleo_env <- merge(coleo_data_traits_plot, env[1:19], by = "plot")
+View(env)
+# put col in front
+colonne_da_spostare <- coleo_env[, 457:474]
+coleo_env <- coleo_env[, -c(457:474)]
+coleo_env <- cbind(coleo_env[, 1:2], colonne_da_spostare, coleo_env[, 3:ncol(coleo_env)])
+
+{
+  
+  boxplot(coleo_env$ndiv ~ coleo_env$stand)
+  coleo_env$stand <- factor(coleo_env$stand,levels = c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"))
+  boxplot(coleo_env$ndiv ~ coleo_env$stand)
+}
+
+{
+  
+  boxplot(coleo_env$SR ~ coleo_env$stand)
+  coleo_env$stand <- factor(coleo_env$stand,levels = c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"))
+  boxplot(coleo_env$SR ~ coleo_env$stand)
+}
+
+
+#nmds plot
+Pnmd <- coleo_env[21:473]
+View(Pnmd)
+
+nmd <- metaMDS(Pnmd,k=3,dist="horn")
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd,groups=coleo_env$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", "cv_canopy_height",
+                      "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu")]
+  colnames(PSenv)<-c("Spruce \nproportion", "                 Douglas proportion", "Box-dimension", "Mean gap area", "CV gap area",
+                     "CV canopy            \nheight         ", "Dead trees", "Tree neighborhood diversity", "Microhabitat richness")
+  
+  envir<-envfit(nmd,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+}
+print(nmd)
+
+ano = anosim(Pnmd, coleo_env$stand, distance = "horn", permutations = 999)
+ano
+
+pairwise.adonis2(Pnmd, coleo_env$stand)
+output=pairwise.adonis(Pnmd, coleo_env$stand)
+output
+write.table(output, file="pairwise_Adonis_plot_DET.csv", sep = ";", dec = ".", row.names = T)
+
+
+#### trap ####
+names(coleo_data_traits_merged)[names(coleo_data_traits_merged) == "stand"] <- "Stand"
+# merging env col
+coleo_env <- merge(coleo_data_traits_merged, env[1:19], by = "plot")
+View(coleo_env)
+# put col in front
+colonne_da_spostare <- coleo_env[, 458:475]
+coleo_env <- coleo_env[, -c(458:475)]
+coleo_env <- cbind(coleo_env[, 1:2], colonne_da_spostare, coleo_env[, 3:ncol(coleo_env)])
+
+# Esempio di normalizzazione Min-Max
+min_value <- min(SRtrap)
+max_value <- max(SRtrap)
+
+# Normalizzazione Min-Max
+coleo_env$ndiv <- (SRtrap - min_value) / (max_value - min_value)
+{
+  
+  boxplot(coleo_env$ndiv ~ coleo_env$stand)
+  coleo_env$stand <- factor(coleo_env$stand,levels = c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"))
+  boxplot(coleo_env$ndiv ~ coleo_env$stand)
+}
+
+#nmds trap
+Tnmd <- coleo_data_traits_merged[4:457]
+
+nmd <- metaMDS(Tnmd,k=3,dist="horn")
+
+par(mar=c(7,7,1,1),mgp=c(4.5,1.5,0), cex.lab = 1.7, cex.axis = 1.7)
+
+plot(nmd,type="p",display="species",xlim=c(-0.1, 0.1),ylim=c(-0.2,0.2))
+{
+  plot(nmd,type="p",display="species",xlim=c(-0.7, 0.7),ylim=c(-0.7,0.6))
+  #ordipointlabel(nmd,display="species",col="red",cex=0.8,pch="+",xlim=c(-1.6,1.6),ylim=c(-1,1),font=3)
+  ordiellipse(nmd,groups=coleo_env$stand,display="sites",kind="sd", draw="polygon",col=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),label=F)
+  #points(nmd,cex=2, pch=c(21,22,23,24,25)[coleo_env$stand],bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")[coleo_env$stand])
+  legend("topleft",c("Douglas fir","Beech-Douglas","Beech","Beech-Spruce","Spruce"),
+         cex=1.1, pt.cex=2,pch=c(21,22,23,24,25),pt.bg=c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f"),bty="n",ncol=1)
+  
+  PSenv<-coleo_env[,c("apa_Spruce", "apa_Douglas", "box_dimension", "mean_gap_area", "cv_gap_area", "cv_canopy_height",
+               "whole_tree_30", "species_ndiv_stand", "Richness_MH_larrieu")]
+  colnames(PSenv)<-c("Spruce \nproportion", "                 Douglas proportion", "Box-dimension", "Mean gap area", "CV gap area",
+                     "CV canopy            \nheight         ", "Dead trees", "Tree neighborhood diversity", "Microhabitat richness")
+  View(coleo_env)
+  envir<-envfit(nmd,PSenv) 
+  envir
+  plot(envir,p.max=0.05,col="darkblue",cex=1.1) 
+  }
+print(nmd)
+
+ano = anosim(nmd, coleo_env$stand, distance = "horn", permutations = 999)
+ano
+
+pairwise.adonis2(Pnmd, coleo_env$stand)
+output=pairwise.adonis(Pnmd, coleo_env$stand)
+output
+write.table(output, file="pairwise_Adonis_plot_DET.csv", sep = ";", dec = ".", row.names = T)
+
+
+#### INEXT ####
+# div per stand
+# subset coleo data traits 
+coleo_datainext <- coleo_data[,c(-1,-2,-3,-7,-9,-11)]
+View(coleo_datainext)
+str(coleo_datainext)
+# Pivota il dataframe trap level -> community matrix
+coleo_datainext <- pivot_wider(
+  data = coleo_datainext,
+  names_from = species,
+  values_from = abundance,
+  values_fn = function(x) ifelse(is.null(x), 0, x))
+# NAs in 0
+coleo_datainext[is.na(coleo_datainext)] <- 0
+coleo_datainext <- aggregate(coleo_datainext[, 4:457],by=list(coleo_datainext$stand),sum)
+coleo_stand.mat <- t(coleo_datainext[,-1])
+colnames(coleo_stand.mat) <- coleo_datainext$Group.1
+coleo_stand.list <- as.list(as.data.frame(coleo_stand.mat))
+
+coleostand <- iNEXT(coleo_stand.list, q=0, datatype="abundance")
+coleostand
+str(coleostand)
+coleostand$stand <- factor(coleo_data$stand,levels = c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"))
+
+rich_plot1 <- ggiNEXT(coleostand)
+rich_plot1
+plot(coleostand)
+is.na(rich_plot1)
+(p1=rich_plot1 + labs(x = "Number of individuals", y = "Species richness") + ggtitle("q = 0")+
+    #scale_fill_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")) +
+    #scale_color_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0","#FE6100","#648fff","#ffb000","#dc267f")) +
+    #scale_shape_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce")) + ylim(0,500) +
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+coleostand1 <- iNEXT(coleo_stand.list, q=1, datatype="abundance")
+rich_plot2 <- ggiNEXT(coleostand1)
+plot(coleostand1)
+
+(p2=rich_plot2 + labs(x = "Number of individuals", y = "Common species diversity") +ggtitle("q = 1")+
+  #  scale_fill_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")) +
+ #   scale_color_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0","#FE6100","#648fff","#ffb000","#dc267f")) +
+  #  scale_shape_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce")) + ylim(0,100)+
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+coleostand2 <-iNEXT(coleo_stand.list, q=2, datatype="abundance")
+rich_plot3 <- ggiNEXT(coleostand2)
+plot(coleostand2)
+
+(p3=rich_plot3 + labs(x = "Number of individuals", y = "Dominant species diversity") + ggtitle("q = 2")+
+    #scale_fill_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0", "#FE6100","#648fff","#ffb000","#dc267f")) +
+    #scale_color_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce"), type = c("#785EF0","#FE6100","#648fff","#ffb000","#dc267f")) +
+    #scale_shape_discrete(limits=c("Douglas fir","Be-Dgl","European beech","Be-Spr","Norway spruce")) +
+    #ylim(0,50)+
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+Graphs <- ggarrange(p1, p2, p3,
+                         ncol = 3, nrow = 1,
+                         common.legend = T, legend = "bottom")
+Graphs
+ggsave("outputs/Graphs.png", plot = Graphs, width = 20, height = 10, dpi = 400)
+
+coleo_mix <- aggregate(coleo_env[, 22:474],by=list(coleo_env$mix),sum)
+
+coleomix.mat <- t(coleo_mix[,-1])
+
+colnames(coleomix.mat) <- coleo_mix$Group.1
+coleomix.list <- as.list(as.data.frame(coleomix.mat))
+icoleomix <- iNEXT(coleomix.list, q=0, datatype="abundance")
+
+rich_plot4 <- ggiNEXT(icoleomix)
+rich_plot4 
+
+(p4=rich_plot4 + labs(x = "Number of individuals", y = "Species richness") + ggtitle("q = 0")+
+    scale_fill_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_color_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_shape_discrete(limits=c("monospecific","mixture")) +
+    ylim(0,400)+
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+icoleomix1 <- iNEXT(coleomix.list, q=1, datatype="abundance")
+rich_plot5 <- ggiNEXT(icoleomix1)
+(p5=rich_plot5 + labs(x = "Number of individuals", y = "Common species diversity") + ggtitle("q = 1")+
+    scale_fill_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_color_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_shape_discrete(limits=c("monospecific","mixture")) +
+    ylim(0,100)+
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+icoleomix2 <- iNEXT(coleomix.list, q=2, datatype="abundance")
+rich_plot6 <- ggiNEXT(icoleomix2)
+(p6=rich_plot6 + labs(x = "Number of individuals", y = "Dominant species diversity") + ggtitle("q = 2")+
+    scale_fill_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_color_discrete(limits=c("monospecific","mixture"), type = c("chartreuse4","chartreuse2")) +
+    scale_shape_discrete(limits=c("monospecific","mixture")) +
+    ylim(0,50)+
+    theme(axis.text=element_text(size=22, color = "black"),
+          axis.title=element_text(size=24),
+          axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+          axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0), size =26),
+          plot.title = element_text(size=22,color = "black",  hjust=0.5),
+          legend.text=element_text(size=18),
+          legend.title=element_text(size=18),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"),
+          plot.margin = margin(0.5,1,0.5,0.5, "cm")))
+
+##### combine plots ########
+
+Graph.total <- ggarrange(p1, p2, p3,
+                         ncol = 3, nrow = 1,
+                         labels = c("a)", "b)", "c)"),
+                         font.label = list(size = 25, color = "black"),
+                         common.legend = T, legend = "bottom")
+Graph.total
+
+Graph.mix <- ggarrange(p4, p5, p6,
+                       ncol = 3, nrow = 1,
+                       labels = c("d)", "e)", "f)"),
+                       font.label = list(size = 25, color = "black"),
+                       common.legend = T, legend = "bottom")
+Graph.mix
+
+
+#### Indicator species ####
+
+df=subset(coleo_env, select = -c(1:22) )
+head(df)
+Zonation=multipatt(df,coleo_env$stand, duleg = T)
+Zonation2=multipatt(df,coleo_env$stand)
+
+{
+  Zonation$sign
+  p.adj <- round(p.adjust(Zonation$sign$p.value, method = "hommel"),3)
+  names(p.adj) <- "p.adj"
+  cbind(Zonation$sign, p.adj)
+  Zonation.adj <- Zonation
+  Zonation.adj$sign$p.value <- p.adj
+  summary(Zonation.adj)
+}
+
+output=capture.output(summary(Zonation))
+summary((Zonation2))
+
+summary(Zonation, indvalcomp= TRUE)
+
+write.table(output, file="outputs/Indicator_species.csv", sep = ";", dec = ".", row.names = T)
+
+
+
+#### feeding guilds analysis ####
+# Identify the location of NAs values and eliminate them
+index_na <- which(is.na(coleo_data_traits[, "Feeding_guild"]), arr.ind = T)
+coleo_data_traits <- coleo_data_traits[-index_na, ] 
+
+
+feeding <- dcast(coleo_data_traits, trap + stand + site + plot ~ Feeding_guild, value.var = "abundance", fun.aggregate = sum)
+View(feeding)
+
+
