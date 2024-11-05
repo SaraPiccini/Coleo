@@ -427,6 +427,9 @@ colnames(coleo_ground)[colnames(coleo_ground) == "Familie"] <- "family"
 colnames(coleo_ground)[colnames(coleo_ground) == "Art"] <- "species"
 colnames(coleo_ground)[colnames(coleo_ground) == "Anzahl"] <- "abundance"
 
+coleo_ground$old_forest_indicators <- ifelse(grepl("^(Acalles|Echinodera|Kyklioacalles|Trachodes)", coleo_ground$species), 1, 0)
+coleo_ground$flightless <- ifelse(grepl("^(Acalles|Echinodera|Kyklioacalles|Trachodes|Byrrhus|Leiosoma|Scleropteridius|Strophosoma)", coleo_ground$species), 1, 0)
+
 # coleo ground north and south 
 coleo_ground_north <- read.table("data/Carabids_north_trapmatrix.txt", header = TRUE, sep = "\t")  
 coleo_ground_south <- read.csv("data/Carabidae_south.csv", sep = ";")
